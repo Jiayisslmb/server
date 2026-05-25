@@ -160,7 +160,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getKeys(pattern: string): Promise<string[]> {
-    return await this.client.keys(pattern);
+    const keys: string[] = [];
+    let cursor = '0';
+    do {
+      const result = await this.client.scan(cursor, { MATCH: pattern, COUNT: 100 });
+      cursor = String(result.cursor);
+      keys.push(...result.keys);
+    } while (cursor !== '0');
+    return keys;
   }
 
   async setUserLastSeen(userId: number, timestamp: number): Promise<void> {

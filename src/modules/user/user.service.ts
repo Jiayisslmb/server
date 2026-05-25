@@ -59,7 +59,7 @@ export class UserService {
     });
 
     if (!user) {
-      throw new NotFoundException('用户名不存在');
+      throw new NotFoundException('用户名或密码错误');
     }
 
     if (user.isFrozen) {
@@ -68,7 +68,7 @@ export class UserService {
 
     const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
     if (!isPasswordValid) {
-      throw new ConflictException('密码错误');
+      throw new NotFoundException('用户名或密码错误');
     }
 
     const { password, ...result } = user;

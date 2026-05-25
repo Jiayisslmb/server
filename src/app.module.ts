@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { PrismaService } from './config/prisma.service';
 import { RedisModule } from './config/redis.module';
 import { IpfsModule } from './common/ipfs.module';
@@ -31,6 +33,14 @@ import { ChatbotModule } from './modules/chatbot/chatbot.module';
       }),
       inject: [ConfigService],
     }),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: 60000,
+          limit: 100,
+        },
+      ],
+    }),
     RedisModule,
     IpfsModule,
     AuthModule,
@@ -44,7 +54,15 @@ import { ChatbotModule } from './modules/chatbot/chatbot.module';
     ChatbotModule,
   ],
   controllers: [AppController],
-  providers: [PrismaService, DataStorageService, ConfigValidationService],
+  providers: [
+    PrismaService,
+    DataStorageService,
+    ConfigValidationService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
   exports: [DataStorageService],
 })
 export class AppModule {}

@@ -84,17 +84,42 @@ export class UserController {
 
   @Get('captcha')
   async generateCaptcha(@Req() req: ExpressRequest) {
+    const ip = this.getClientIp(req);
+    const ipKey = `captcha:ip:${ip}`;
+
+    const ipCount = parseInt(await this.redis.get(ipKey) || '0', 10);
+    if (ipCount >= 10) {
+      throw new HttpException('请求过于频繁，请稍后再试', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    await this.redis.set(ipKey, (ipCount + 1).toString(), 60);
+
     const crypto = require('crypto');
-    const num1 = Math.floor(Math.random() * 50) + 1;
-    const num2 = Math.floor(Math.random() * 50) + 1;
-    const answer = num1 + num2;
+    const operations = [
+      () => {
+        const a = Math.floor(Math.random() * 50) + 10;
+        const b = Math.floor(Math.random() * 30) + 1;
+        return { question: `${a} + ${b} = ?`, answer: a + b };
+      },
+      () => {
+        const a = Math.floor(Math.random() * 40) + 20;
+        const b = Math.floor(Math.random() * 20) + 1;
+        return { question: `${a} - ${b} = ?`, answer: a - b };
+      },
+      () => {
+        const a = Math.floor(Math.random() * 9) + 2;
+        const b = Math.floor(Math.random() * 9) + 2;
+        return { question: `${a} × ${b} = ?`, answer: a * b };
+      },
+    ];
+
+    const op = operations[Math.floor(Math.random() * operations.length)]();
     const key = crypto.randomBytes(16).toString('hex');
 
-    await this.redis.set(`captcha:${key}`, answer.toString(), 300);
+    await this.redis.set(`captcha:${key}`, op.answer.toString(), 300);
 
     return {
       key,
-      question: `${num1} + ${num2} = ?`,
+      question: op.question,
     };
   }
 

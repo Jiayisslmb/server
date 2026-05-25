@@ -33,6 +33,7 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ConfigService } from '@nestjs/config';
+import helmet from 'helmet';
 
 /**
  * 应用启动引导函数
@@ -67,6 +68,11 @@ async function bootstrap() {
    * AppModule会递归加载所有子模块和服务
    */
   const app = await NestFactory.create(AppModule);
+
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }));
 
   /**
    * 步骤2: 获取配置服务实例
@@ -212,36 +218,19 @@ async function bootstrap() {
    *
    * @access 访问地址：http://localhost:3001/api-docs
    */
-  const config = new DocumentBuilder()
-    .setTitle('去中心化社交平台 API')
-    .setDescription('后端 API 接口文档')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
+  const isProduction = configService.get<string>('NODE_ENV') === 'production';
 
-  /**
-   * 生成Swagger文档对象
-   *
-   * @type {OpenApiObject}
-   * @description 基于控制器装饰器和DTO类自动生成OpenAPI 3.0规范文档
-   * 包含所有端点、参数、响应格式等信息
-   */
-  const document = SwaggerModule.createDocument(app, config);
+  if (!isProduction) {
+    const config = new DocumentBuilder()
+      .setTitle('去中心化社交平台 API')
+      .setDescription('后端 API 接口文档')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  /**
-   * 挂载Swagger UI界面
-   *
-   * @param {string} path - 访问路径 '/api-docs'
-   * @param {INestApplication} app - NestJS应用实例
-   * @param {OpenApiObject} document - OpenAPI文档对象
-   *
-   * @feature 功能特性：
-   * - 交互式API测试界面
-   * - 参数自动填充
-   * - 认证Token输入框
-   * - 响应示例展示
-   */
-  SwaggerModule.setup('api-docs', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api-docs', app, document);
+  }
 
   // ============================================================
   // 步骤8: 启动HTTP服务器

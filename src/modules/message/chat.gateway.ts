@@ -14,6 +14,7 @@ import * as jwt from 'jsonwebtoken';
 import { RedisService } from 'src/config/redis.service';
 import { PrismaService } from 'src/config/prisma.service';
 import { NotificationService } from 'src/modules/notification/notification.service';
+import { EncryptionService } from 'src/common/services/encryption.service';
 
 interface UserSocket {
   userId: number;
@@ -86,6 +87,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private redis: RedisService,
     private prisma: PrismaService,
     private notificationService: NotificationService,
+    private encryptionService: EncryptionService,
   ) {
     this.jwtSecret = this.configService.get<string>('JWT_SECRET') || '';
     this.startHeartbeatChecker();
@@ -308,9 +310,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     try {
+      const encryptedContent = this.encryptionService.encryptForStorage(payload.content);
       const message = await this.prisma.message.create({
         data: {
-          content: payload.content,
+          content: encryptedContent,
           mediaCid: payload.mediaCid,
           senderId,
           receiverId: payload.receiverId,
@@ -327,7 +330,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const messageData = {
         id: message.id,
-        content: message.content,
+        content: payload.content,
         senderId: message.senderId,
         receiverId: message.receiverId,
         createdAt: message.createdAt,
