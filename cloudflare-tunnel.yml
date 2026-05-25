@@ -1,0 +1,19 @@
+# Cloudflare Named Tunnel 配置
+# 用于将本地后端安全暴露到公网，具备完整 DDoS 防护
+
+tunnel: desocial-backend
+credentials-file: C:\Users\廖佳睿\.cloudflared\899f01d3-4e45-4041-89fa-cfa9ad515049.json
+
+ingress:
+  - hostname: api.desocial.com
+    service: http://localhost:3002
+  - hostname: app.desocial.com
+    service: http://localhost:3000
+  - service: http_status:404
+
+# DDoS 防护在 Cloudflare 控制台配置（免费）：
+# 1. Security → DDoS → 默认已开启 L3/L4 防护
+# 2. Security → WAF → 创建规则：
+#    - Rate Limiting: 100 req/10s per IP
+#    - Block suspicious UA: (curl|python|go-http)
+#    - Block known attack paths: /wp-admin /adminer /phpmyadmin
