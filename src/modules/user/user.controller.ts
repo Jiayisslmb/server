@@ -14,6 +14,7 @@ import {
   Req,
   BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service';
 import { CreateUserDto, LoginDto, UpdateUserDto } from './dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -56,6 +57,7 @@ export class UserController {
     return req.socket.remoteAddress || 'unknown';
   }
 
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @Post('register')
   async create(@Body() createUserDto: CreateUserDto, @Req() req: ExpressRequest) {
     const ip = this.getClientIp(req);

@@ -34,6 +34,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 
 /**
  * 应用启动引导函数
@@ -73,6 +74,49 @@ async function bootstrap() {
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false,
   }));
+
+  // 请求体大小限制 — 防止大 payload 攻击
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
+
+  // DDoS 基础防护中间件
+  const ipRequestCounts = new Map<string, { count: number; resetAt: number }>();
+  app.use((req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const window = 10000; // 10 秒窗口
+    const maxRequests = 50;  // 每 10 秒最多 50 次
+
+    let record = ipRequestCounts.get(ip);
+    if (!record || now > record.resetAt) {
+      record = { count: 0, resetAt: now + window };
+      ipRequestCounts.set(ip, record);
+    }
+
+    record.count++;
+
+    if (record.count > maxRequests) {
+      res.status(429).json({ message: '请求过于频繁，请稍后重试' });
+      return;
+    }
+
+    // 定期清理过期记录
+    if (Math.random() < 0.01) {
+      for (const [key, val] of ipRequestCounts) {
+        if (now > val.resetAt) ipRequestCounts.delete(key);
+      }
+    }
+
+    next();
+  });
+
+  // 全局请求超时
+  app.use((_req, res, next) => {
+    res.setTimeout(30000, () => {
+      res.status(408).json({ message: '请求超时' });
+    });
+    next();
+  });
 
   /**
    * 步骤2: 获取配置服务实例

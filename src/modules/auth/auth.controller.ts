@@ -1,4 +1,5 @@
 import { Controller, Post, Body, Req, UseGuards, Get } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from '../user/dto/login.dto';
 import type { Request } from 'express';
@@ -8,17 +9,20 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @Post('login')
   login(@Body() loginDto: LoginDto, @Req() req: Request) {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     return this.authService.login(loginDto, ip, req);
   }
 
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
   @Post('admin/login')
   adminLogin(@Body() loginDto: LoginDto, @Req() req: Request) {
     return this.authService.adminLogin(loginDto, req);
   }
 
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   @Post('refresh')
   async refreshToken(@Body('refreshToken') refreshToken: string) {
     return this.authService.refreshToken(refreshToken);

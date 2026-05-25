@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { PrismaService } from './config/prisma.service';
 import { RedisService } from './config/redis.service';
 
@@ -20,6 +21,7 @@ export class AppController {
     };
   }
 
+  @SkipThrottle()
   @Get('health')
   @ApiOperation({ summary: '健康检查' })
   async healthCheck(): Promise<{
