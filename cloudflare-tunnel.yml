@@ -1,15 +1,27 @@
 # Cloudflare Named Tunnel 配置
 # 用于将本地后端安全暴露到公网，具备完整 DDoS 防护
+# 启动命令: cloudflared tunnel run desocial-backend
 
 tunnel: desocial-backend
 credentials-file: C:\Users\廖佳睿\.cloudflared\899f01d3-4e45-4041-89fa-cfa9ad515049.json
 
 ingress:
+  # 后端 API 服务 (NestJS 端口 3002)
   - hostname: api.desocial.com
     service: http://localhost:3002
+  # 前端应用 (Next.js 端口 3000)
   - hostname: app.desocial.com
     service: http://localhost:3000
+  # 默认拒绝所有其他请求
   - service: http_status:404
+
+# Cloudflare DNS 记录 (需在 Cloudflare 控制台配置):
+#   CNAME  api.desocial.com  ->  desocial-backend.cfargotunnel.com
+#   CNAME  app.desocial.com  ->  desocial-backend.cfargotunnel.com
+#
+# SSL/TLS 设置:
+#   Cloudflare Dashboard → SSL/TLS → Overview → 选择 "Full" 或 "Full (strict)"
+#   确保 Edge Certificates 中已启用 "Always Use HTTPS"
 
 # DDoS 防护在 Cloudflare 控制台配置（免费）：
 # 1. Security → DDoS → 默认已开启 L3/L4 防护

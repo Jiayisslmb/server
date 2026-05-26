@@ -34,6 +34,9 @@ export class AdminService {
       select: {
         id: true,
         username: true,
+        nickname: true,
+        avatarCid: true,
+        bio: true,
         isAdmin: true,
         isFrozen: true,
         createdAt: true,

@@ -143,7 +143,13 @@ async function bootstrap() {
    * - 避免使用通配符'*'以防止CSRF攻击
    * - 开发环境可放宽限制便于调试
    */
-  const corsOrigins = configService.get<string>('CORS_ORIGINS')?.split(',') || ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  const corsOrigins = configService.get<string>('CORS_ORIGINS')?.split(',') || [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://app.desocial.com',
+    'https://api.desocial.com',
+    'https://desocial.pages.dev',
+  ];
 
   /**
    * 启用CORS中间件

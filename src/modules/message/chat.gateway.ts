@@ -55,12 +55,19 @@ interface UserStatusInfo {
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'https://app.desocial.com',
+      'https://client-six-lac-79.vercel.app',
+      ...(process.env.CORS_ORIGINS?.split(',').filter(Boolean) || []),
+    ],
     credentials: true,
   },
   namespace: '/chat',
   pingInterval: 25000,
   pingTimeout: 60000,
+  transports: ['websocket', 'polling'],
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
