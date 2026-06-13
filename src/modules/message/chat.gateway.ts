@@ -83,10 +83,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private lastStatusBroadcast: Map<number, boolean> = new Map();
   
   private readonly heartbeatConfig: HeartbeatConfig = {
-    interval: 30000,
-    timeout: 90000,
+    interval: 15000,
+    timeout: 45000,
     maxMissed: 3,
-    statusBroadcastInterval: 5000,
+    statusBroadcastInterval: 0,
   };
 
   constructor(
@@ -97,6 +97,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private encryptionService: EncryptionService,
   ) {
     this.jwtSecret = this.configService.get<string>('JWT_SECRET') || '';
+    if (!this.jwtSecret || this.jwtSecret.length < 32) {
+      throw new Error('JWT_SECRET 未配置或长度不足（至少32字符）。请在 .env 文件中设置强随机密钥。');
+    }
     this.startHeartbeatChecker();
     this.startStatusBroadcast();
   }
@@ -545,9 +548,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private startStatusBroadcast(): void {
-    this.statusBroadcastTimer = setInterval(() => {
-      this.broadcastAllOnlineUsers();
-    }, this.heartbeatConfig.statusBroadcastInterval);
+    // Status broadcast is now event-driven (on connect/disconnect)
+    // Periodic broadcast disabled to reduce network traffic
   }
 
   private async broadcastAllOnlineUsers(): Promise<void> {

@@ -35,8 +35,13 @@ export class ConfigValidationService implements OnModuleInit {
     }
 
     const jwtSecret = this.configService.get<string>('JWT_SECRET');
-    if (jwtSecret && (jwtSecret === 'your-secret-key' || jwtSecret.length < 32)) {
-      this.logger.warn('警告: JWT_SECRET 应该是一个至少32字符的随机字符串');
+    if (!jwtSecret || jwtSecret.length < 32) {
+      throw new Error('JWT_SECRET 长度不足（至少32字符）。请使用 node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))" 生成强随机密钥');
+    }
+
+    const encryptionKey = this.configService.get<string>('ENCRYPTION_KEY');
+    if (!encryptionKey || encryptionKey.length < 32) {
+      this.logger.warn('警告: ENCRYPTION_KEY 未配置或长度不足，加密功能可能不可用');
     }
 
     this.logger.log('环境变量验证通过');

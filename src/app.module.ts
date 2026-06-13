@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaService } from './config/prisma.service';
@@ -41,6 +42,7 @@ import { ChatbotModule } from './modules/chatbot/chatbot.module';
         },
       ],
     }),
+    PassportModule.register({ defaultStrategy: 'jwt' }),
     RedisModule,
     IpfsModule,
     AuthModule,

@@ -113,6 +113,58 @@ export class UserService {
     return user;
   }
 
+  async findByGithubId(githubId: string) {
+    return this.prisma.user.findUnique({
+      where: { githubId },
+      select: {
+        id: true,
+        username: true,
+        isAdmin: true,
+        isFrozen: true,
+      },
+    });
+  }
+
+  async checkUsernameExists(username: string): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { username },
+      select: { id: true },
+    });
+    return !!user;
+  }
+
+  async createFromGitHub(data: {
+    githubId: string;
+    username: string;
+    password: string;
+    nickname?: string;
+    avatarUrl?: string;
+  }) {
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+
+    return this.prisma.user.create({
+      data: {
+        githubId: data.githubId,
+        username: data.username,
+        password: hashedPassword,
+        nickname: data.nickname || null,
+        avatarUrl: data.avatarUrl || null,
+        updatedAt: new Date(),
+      },
+      select: {
+        id: true,
+        username: true,
+        nickname: true,
+        avatarUrl: true,
+        avatarCid: true,
+        bio: true,
+        isAdmin: true,
+        isFrozen: true,
+        createdAt: true,
+      },
+    });
+  }
+
   async findByUsername(username: string) {
     const user = await this.prisma.user.findUnique({
       where: { username },

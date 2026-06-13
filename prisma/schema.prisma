@@ -373,6 +373,8 @@ model user {
   adminDeviceFingerprint                    String?             @db.VarChar(255)
   adminSessionToken                         String?             @db.VarChar(255)
   failedLoginAttempts                       Int                 @default(0)
+  githubId                                  String?             @unique @db.VarChar(50)
+  avatarUrl                                 String?             @db.VarChar(500)
   lastAdminLogin                            DateTime?
   lockedUntil                               DateTime?
   mfaEnabled                                Boolean             @default(false)
@@ -402,6 +404,7 @@ model user {
   userfollows_userfollows_followingIdTouser userfollows[]       @relation("userfollows_followingIdTouser")
 
   @@index([adminDeviceFingerprint], map: "User_adminDeviceFingerprint_idx")
+  @@index([githubId], map: "User_githubId_idx")
 }
 
 model userfollows {
