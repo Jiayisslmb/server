@@ -1,5 +1,5 @@
 import { Controller, Get, Req, Res, UseGuards, Logger } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { GitHubAuthGuard } from './github-auth.guard';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
@@ -31,13 +31,13 @@ export class GitHubAuthController {
   }
 
   @Get('github')
-  @UseGuards(AuthGuard('github'))
+  @UseGuards(GitHubAuthGuard)
   async githubAuth() {
     // Guard redirects to GitHub
   }
 
   @Get('github/callback')
-  @UseGuards(AuthGuard('github'))
+  @UseGuards(GitHubAuthGuard)
   async githubAuthCallback(@Req() req: any, @Res() res: Response) {
     const githubProfile: GitHubProfile = req.user;
 

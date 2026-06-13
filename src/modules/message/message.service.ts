@@ -205,14 +205,13 @@ export class MessageService {
           },
         });
 
-        let lastMessageContent = '[消息内容]';
+        let lastMessageContent = '[加密消息]';
         try {
-          lastMessageContent = this.encryptionService.decryptFromStorage(message.content);
-          if (lastMessageContent.length > 50) {
-            lastMessageContent = lastMessageContent.substring(0, 50) + '...';
-          }
-        } catch (error) {
-          this.logger.warn(`消息 ${message.id} 解密失败`);
+          const decrypted = this.encryptionService.decryptFromStorage(message.content);
+          lastMessageContent = decrypted.length > 50 ? decrypted.substring(0, 50) + '...' : decrypted;
+        } catch (error: unknown) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`消息 ${message.id} 解密失败: ${errMsg}`);
         }
 
         conversations.set(otherId, {
