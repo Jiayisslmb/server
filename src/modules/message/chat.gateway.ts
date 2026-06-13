@@ -65,7 +65,7 @@ interface UserStatusInfo {
     credentials: true,
   },
   namespace: '/api/chat',
-  path: '/api/socket.io',
+  path: '/api/socket.io/',
   pingInterval: 25000,
   pingTimeout: 60000,
   transports: ['websocket', 'polling'],
