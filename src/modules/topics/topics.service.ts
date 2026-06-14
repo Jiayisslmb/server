@@ -252,57 +252,80 @@ export class TopicsService {
   async getTopicByName(name: string) {
     const topic = await this.prisma.topic.findUnique({
       where: { name },
-      include: {
-        articletopic: {
-          take: 20,
-          orderBy: { createdAt: 'desc' },
-          include: {
-            article: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    username: true,
-                    nickname: true,
-                    avatarCid: true,
-                  },
-                },
-                circle: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-                articlelike: { select: { userId: true } },
-                articlecomment: { select: { id: true } },
-              },
-            },
-          },
-        },
-        momenttopic: {
-          take: 20,
-          orderBy: { createdAt: 'desc' },
-          include: {
-            moment: {
-              include: {
-                user: {
-                  select: {
-                    id: true,
-                    username: true,
-                    nickname: true,
-                    avatarCid: true,
-                  },
-                },
-                momentlike: { select: { userId: true } },
-                momentcomment: { select: { id: true } },
-              },
-            },
-          },
-        },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        postCount: true,
+        createdAt: true,
       },
     });
 
-    return topic;
+    if (!topic) return null;
+
+    // 拆分为 3 次独立轻量查询，避免单次巨型嵌套查询导致 MySQL 崩溃
+    const [articleTopics, momentTopics] = await Promise.all([
+      this.prisma.articletopic.findMany({
+        where: { topicId: topic.id },
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          article: {
+            include: {
+              user: {
+                select: { id: true, username: true, nickname: true, avatarCid: true },
+              },
+              circle: {
+                select: { id: true, name: true },
+              },
+              _count: {
+                select: { articlelike: true, articlecomment: true, articlerepost: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.momenttopic.findMany({
+        where: { topicId: topic.id },
+        take: 20,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          moment: {
+            include: {
+              user: {
+                select: { id: true, username: true, nickname: true, avatarCid: true },
+              },
+              _count: {
+                select: { momentlike: true, momentcomment: true, momentrepost: true },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    // 后处理：将 _count 映射为类数组以保持客户端兼容（客户端使用 .length）
+    return {
+      ...topic,
+      articletopic: articleTopics.map(at => ({
+        ...at,
+        article: {
+          ...at.article,
+          articlelike: new Array(at.article._count.articlelike),
+          articlecomment: new Array(at.article._count.articlecomment),
+          articlerepost: new Array(at.article._count.articlerepost),
+        },
+      })),
+      momenttopic: momentTopics.map(mt => ({
+        ...mt,
+        moment: {
+          ...mt.moment,
+          momentlike: new Array(mt.moment._count.momentlike),
+          momentcomment: new Array(mt.moment._count.momentcomment),
+          momentrepost: new Array(mt.moment._count.momentrepost),
+        },
+      })),
+    };
   }
 
   async getTopicArticles(topicName: string, skip: number = 0, take: number = 20) {
@@ -336,8 +359,9 @@ export class TopicsService {
                 name: true,
               },
             },
-            articlelike: { select: { userId: true } },
-            articlecomment: { select: { id: true } },
+            _count: {
+              select: { articlelike: true, articlecomment: true, articlerepost: true },
+            },
           },
         },
       },
@@ -345,8 +369,9 @@ export class TopicsService {
 
     return articleTopics.map(at => ({
       ...at.article,
-      likes: at.article.articlelike.length,
-      comments: at.article.articlecomment.length,
+      likes: at.article._count.articlelike,
+      comments: at.article._count.articlecomment,
+      shares: at.article._count.articlerepost,
     }));
   }
 
@@ -375,8 +400,9 @@ export class TopicsService {
                 avatarCid: true,
               },
             },
-            momentlike: { select: { userId: true } },
-            momentcomment: { select: { id: true } },
+            _count: {
+              select: { momentlike: true, momentcomment: true, momentrepost: true },
+            },
           },
         },
       },
@@ -384,8 +410,9 @@ export class TopicsService {
 
     return momentTopics.map(mt => ({
       ...mt.moment,
-      likes: mt.moment.momentlike.length,
-      comments: mt.moment.momentcomment.length,
+      likes: mt.moment._count.momentlike,
+      comments: mt.moment._count.momentcomment,
+      shares: mt.moment._count.momentrepost,
     }));
   }
 

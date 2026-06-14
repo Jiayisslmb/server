@@ -54,12 +54,14 @@ export class UserService {
   }
 
   async validateUser(loginDto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { username: loginDto.username },
-    });
+    // 支持用户名或邮箱登录
+    const isEmail = loginDto.username.includes('@');
+    const user = isEmail
+      ? await this.prisma.user.findUnique({ where: { email: loginDto.username } })
+      : await this.prisma.user.findUnique({ where: { username: loginDto.username } });
 
     if (!user) {
-      throw new NotFoundException('用户名或密码错误');
+      throw new NotFoundException(isEmail ? '邮箱或密码错误' : '用户名或密码错误');
     }
 
     if (user.isFrozen) {
@@ -204,6 +206,40 @@ export class UserService {
     }
 
     return user;
+  }
+
+  async findByEmail(email: string) {
+    return this.prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        username: true,
+        nickname: true,
+        avatarCid: true,
+        backgroundCid: true,
+        backgroundColor: true,
+        globalBackgroundCid: true,
+        globalBackgroundColor: true,
+        bio: true,
+        isAdmin: true,
+        isFrozen: true,
+        mfaEnabled: true,
+        language: true,
+        fontSize: true,
+        colorScheme: true,
+        defaultVisibility: true,
+        email: true,
+        emailVerified: true,
+      },
+    });
+  }
+
+  async updatePassword(userId: number, newPassword: string) {
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword, updatedAt: new Date() },
+    });
   }
 
   async findByIdWithPrivacy(viewerId: number | null, targetUserId: number) {

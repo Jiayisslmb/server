@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req, UseGuards, Get } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, Get, HttpCode } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from '../user/dto/login.dto';
@@ -79,5 +79,65 @@ export class AuthController {
     @Body('mfaToken') mfaToken: string
   ) {
     return this.authService.disableAdminMfa(req.user.id, req, password, mfaToken);
+  }
+
+  // ═══ 邮箱验证码登录 ═══
+
+  @Throttle({ default: { ttl: 60000, limit: 1 } })
+  @Post('send-login-code')
+  @HttpCode(200)
+  async sendLoginCode(@Body('email') email: string) {
+    return this.authService.sendEmailLoginCode(email);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Post('login-with-code')
+  @HttpCode(200)
+  async loginWithCode(
+    @Body('email') email: string,
+    @Body('code') code: string,
+  ) {
+    return this.authService.loginWithEmailCode(email, code);
+  }
+
+  // ═══ 密码找回 ═══
+
+  @Throttle({ default: { ttl: 60000, limit: 1 } })
+  @Post('forgot-password')
+  @HttpCode(200)
+  async forgotPassword(@Body('email') email: string) {
+    return this.authService.sendPasswordResetCode(email);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Post('verify-reset-code')
+  @HttpCode(200)
+  async verifyResetCode(
+    @Body('email') email: string,
+    @Body('code') code: string,
+  ) {
+    return this.authService.verifyResetCode(email, code);
+  }
+
+  @Throttle({ default: { ttl: 60000, limit: 3 } })
+  @Post('reset-password')
+  @HttpCode(200)
+  async resetPassword(
+    @Body('resetToken') resetToken: string,
+    @Body('newPassword') newPassword: string,
+  ) {
+    return this.authService.resetPassword(resetToken, newPassword);
+  }
+
+  // ═══ Turnstile 人机验证 ═══
+
+  @Post('verify-turnstile')
+  @HttpCode(200)
+  async verifyTurnstile(
+    @Body('token') token: string,
+    @Req() req: Request,
+  ) {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    return this.authService.verifyTurnstile(token, ip);
   }
 }

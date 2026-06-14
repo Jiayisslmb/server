@@ -2,8 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'desocial-server',
-      script: 'npm',
-      args: 'run start:prod',
+      script: 'dist/src/main.js',
       env: {
         NODE_ENV: 'production',
         NEST_PORT: 3002,

@@ -1,10 +1,11 @@
-import { Injectable, UnauthorizedException, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { UserService } from '../user/user.service';
 import { LoginDto } from '../user/dto/login.dto';
 import { RedisService } from 'src/config/redis.service';
 import { AdminSecurityService } from 'src/common/services/admin-security.service';
+import { EmailService } from 'src/common/services/email.service';
 import { Request } from 'express';
 
 @Injectable()
@@ -20,6 +21,7 @@ export class AuthService {
     private configService: ConfigService,
     private redis: RedisService,
     private adminSecurity: AdminSecurityService,
+    private emailService: EmailService,
   ) {}
 
   async login(loginDto: LoginDto, ip: string, req?: Request) {
@@ -478,6 +480,158 @@ export class AuthService {
     );
 
     return { success: true, message: 'MFA禁用成功' };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 邮箱验证码登录
+  // ═══════════════════════════════════════════════════════════════
+
+  async sendEmailLoginCode(email: string) {
+    const user = await this.userService.findByEmail(email);
+    if (!user) throw new NotFoundException('该邮箱未注册');
+
+    const code = this.generateVerificationCode();
+    const key = `email:login:${email}`;
+    await this.redis.set(key, code, 300); // 5分钟过期
+
+    const sent = await this.emailService.sendVerificationCode(email, code);
+    if (!sent) throw new BadRequestException('邮件发送失败，请稍后重试');
+
+    this.logger.log(`邮箱登录验证码已发送: ${email}`);
+    return { success: true, message: '验证码已发送' };
+  }
+
+  async loginWithEmailCode(email: string, code: string) {
+    const key = `email:login:${email}`;
+    const storedCode = await this.redis.get(key);
+
+    if (!storedCode || storedCode !== code) {
+      throw new UnauthorizedException('验证码错误或已过期');
+    }
+
+    await this.redis.del(key);
+
+    const user = await this.userService.findByEmail(email);
+    if (!user) throw new NotFoundException('用户不存在');
+
+    const payload = { id: user.id, username: user.username, isAdmin: user.isAdmin };
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '2h' });
+    const refreshToken = this.generateRefreshToken(user.id);
+    await this.storeRefreshToken(user.id, refreshToken);
+
+    return {
+      accessToken,
+      refreshToken,
+      expiresIn: 2 * 60 * 60,
+      user: {
+        id: user.id,
+        username: user.username,
+        nickname: user.nickname,
+        avatarCid: user.avatarCid,
+        isAdmin: user.isAdmin,
+      },
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 密码找回
+  // ═══════════════════════════════════════════════════════════════
+
+  async sendPasswordResetCode(email: string) {
+    const user = await this.userService.findByEmail(email);
+    if (!user) throw new NotFoundException('该邮箱未注册');
+
+    const code = this.generateVerificationCode();
+    const key = `pwd:reset:${email}`;
+    await this.redis.set(key, code, 300); // 5分钟过期
+
+    const sent = await this.emailService.sendPasswordResetCode(email, code);
+    if (!sent) throw new BadRequestException('邮件发送失败，请稍后重试');
+
+    this.logger.log(`密码重置验证码已发送: ${email}`);
+    return { success: true, message: '验证码已发送' };
+  }
+
+  async verifyResetCode(email: string, code: string) {
+    const key = `pwd:reset:${email}`;
+    const storedCode = await this.redis.get(key);
+
+    if (!storedCode || storedCode !== code) {
+      throw new UnauthorizedException('验证码错误或已过期');
+    }
+
+    // 验证通过后生成临时 token 用于重置密码
+    const resetToken = this.generateRefreshToken(email as unknown as number);
+    const tokenKey = `pwd:token:${resetToken}`;
+    await this.redis.set(tokenKey, email, 300);
+
+    return { resetToken };
+  }
+
+  async resetPassword(resetToken: string, newPassword: string) {
+    const tokenKey = `pwd:token:${resetToken}`;
+    const email = await this.redis.get(tokenKey);
+
+    if (!email) {
+      throw new UnauthorizedException('重置令牌已过期，请重新发起');
+    }
+
+    const user = await this.userService.findByEmail(email);
+    if (!user) throw new NotFoundException('用户不存在');
+
+    await this.userService.updatePassword(user.id, newPassword);
+    await this.redis.del(tokenKey);
+    await this.redis.del(`pwd:reset:${email}`);
+
+    this.logger.log(`密码已重置: ${email}`);
+    return { success: true, message: '密码重置成功' };
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Cloudflare Turnstile 验证
+  // ═══════════════════════════════════════════════════════════════
+
+  async verifyTurnstile(token: string, ip?: string) {
+    const secretKey = this.configService.get('TURNSTILE_SECRET_KEY');
+    if (!secretKey) {
+      // Turnstile 未配置时降级通过
+      this.logger.warn('Turnstile 未配置，跳过验证');
+      return { success: true };
+    }
+
+    try {
+      const formData = new URLSearchParams();
+      formData.append('secret', secretKey);
+      formData.append('response', token);
+      if (ip) formData.append('remoteip', ip);
+
+      const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        this.logger.warn(`Turnstile 验证失败: ${JSON.stringify(data)}`);
+        throw new UnauthorizedException('人机验证失败，请重试');
+      }
+
+      return { success: true };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      // 网络异常时降级通过
+      this.logger.warn(`Turnstile 验证服务异常，降级通过: ${error.message}`);
+      return { success: true };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 工具方法
+  // ═══════════════════════════════════════════════════════════════
+
+  private generateVerificationCode(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
   private getClientIp(req: Request): string {

@@ -9,6 +9,7 @@ import { UserModule } from '../user/user.module';
 import { RedisService } from 'src/config/redis.service';
 import { AdminSecurityService } from 'src/common/services/admin-security.service';
 import { PrismaService } from 'src/config/prisma.service';
+import { EmailService } from 'src/common/services/email.service';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { PrismaService } from 'src/config/prisma.service';
     }),
   ],
   controllers: [AuthController, GitHubAuthController],
-  providers: [AuthService, GitHubStrategy, RedisService, AdminSecurityService, PrismaService],
+  providers: [AuthService, GitHubStrategy, RedisService, AdminSecurityService, PrismaService, EmailService],
   exports: [AuthService],
 })
 export class AuthModule {}

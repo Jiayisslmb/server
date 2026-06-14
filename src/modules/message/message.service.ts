@@ -153,6 +153,7 @@ export class MessageService {
   }
 
   async getConversationList(userId: number) {
+    // Step 1: 仅取最近 200 条消息用于去重（避免全表扫描）
     const messages = await this.prisma.message.findMany({
       where: {
         OR: [
@@ -161,6 +162,7 @@ export class MessageService {
         ],
       },
       orderBy: { createdAt: 'desc' },
+      take: 200,
       include: {
         user_message_senderIdTouser: {
           select: {
@@ -181,11 +183,17 @@ export class MessageService {
       },
     });
 
-    const conversations = new Map();
+    const conversations = new Map<number, {
+      userId: number;
+      user: any;
+      lastMessage: string;
+      lastMessageTime: Date;
+      unreadCount: number;
+    }>();
 
     for (const message of messages) {
       const otherId = message.senderId === userId ? message.receiverId : message.senderId;
-      
+
       if (otherId === userId) {
         continue;
       }
@@ -197,14 +205,6 @@ export class MessageService {
       }
 
       if (!conversations.has(otherId)) {
-        const unreadCount = await this.prisma.message.count({
-          where: {
-            senderId: otherId,
-            receiverId: userId,
-            isRead: false,
-          },
-        });
-
         let lastMessageContent = '[加密消息]';
         try {
           const decrypted = this.encryptionService.decryptFromStorage(message.content);
@@ -219,8 +219,29 @@ export class MessageService {
           user: otherUser,
           lastMessage: lastMessageContent,
           lastMessageTime: message.createdAt,
-          unreadCount,
+          unreadCount: 0,
         });
+      }
+    }
+
+    // Step 2: 批量查询未读计数（1 次 groupBy 替代 N 次 count）
+    const otherUserIds = Array.from(conversations.keys());
+    if (otherUserIds.length > 0) {
+      const unreadCounts = await this.prisma.message.groupBy({
+        by: ['senderId'],
+        where: {
+          senderId: { in: otherUserIds },
+          receiverId: userId,
+          isRead: false,
+        },
+        _count: { id: true },
+      });
+
+      for (const uc of unreadCounts) {
+        const conv = conversations.get(uc.senderId);
+        if (conv) {
+          conv.unreadCount = uc._count.id;
+        }
       }
     }
 

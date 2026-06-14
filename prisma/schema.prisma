@@ -300,6 +300,7 @@ model message {
 
   @@index([receiverId], map: "Message_receiverId_fkey")
   @@index([senderId], map: "Message_senderId_fkey")
+  @@index([senderId, receiverId, createdAt], map: "Message_senderId_receiverId_createdAt_idx")
 }
 
 model notification {
@@ -383,6 +384,10 @@ model user {
   defaultVisibility                         String              @default("public") @db.VarChar(20)
   fontSize                                  String              @default("medium") @db.VarChar(10)
   language                                  String              @default("zh-CN") @db.VarChar(10)
+  email                                     String?             @unique @db.VarChar(255)
+  emailVerified                             Boolean             @default(false)
+  emailVerifyToken                          String?             @db.VarChar(255)
+  emailVerifyTokenExpires                   DateTime?
   adminauditlog                             adminauditlog[]
   adminsession                              adminsession[]
   article                                   article[]
