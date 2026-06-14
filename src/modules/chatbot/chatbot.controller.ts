@@ -18,13 +18,23 @@ export class ChatbotController {
   ) {}
 
   @Post('message')
-  async sendMessage(@Body() dto: SendMessageDto, @Res() res: Response, @Req() req: ExpressRequest) {
+  @UseGuards(JwtAuthGuard)
+  async sendMessage(
+    @Body() dto: SendMessageDto & { conversationId?: number; mode?: string },
+    @Res() res: Response,
+    @Request() req: any,
+  ) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    const subscription = this.chatbotService.sendMessageStream(dto.messages).subscribe({
+    const userId = req.user?.id;
+    const subscription = this.chatbotService.sendMessageStream(dto.messages, {
+      userId,
+      conversationId: dto.conversationId,
+      mode: dto.mode as 'fast' | 'deep' | 'auto' | undefined,
+    }).subscribe({
       next: (chunk: string) => {
         res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
       },

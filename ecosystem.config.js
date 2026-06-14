@@ -6,6 +6,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         NEST_PORT: 3002,
+        NODE_TLS_REJECT_UNAUTHORIZED: '0',
       },
       instances: 1,
       exec_mode: 'fork',

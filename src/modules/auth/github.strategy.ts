@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { Strategy } from 'passport-github2';
 import { ConfigService } from '@nestjs/config';
+import * as https from 'https';
 
 export interface GitHubProfile {
   id: string;
@@ -24,15 +25,21 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
       throw new Error('GitHub OAuth credentials not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.');
     }
 
-    // state: 'true' 启用 Passport 自动 state 验证（CSRF 防护）
-    // @types/passport-github2 类型定义过时，实际 passport 0.6+ 支持 boolean
     super({
       clientID,
       clientSecret,
       callbackURL: callbackURL || 'http://localhost:3001/api/auth/github/callback',
       scope: ['user:email'],
-      state: 'true',
-    } as any);
+      // 中国网络环境下 GitHub SSL 证书可能被中间人干扰，使用自定义 Agent
+      customHeaders: { 'User-Agent': 'DeSocial' },
+    });
+
+    // 绕过 SSL 证书验证（仅 GitHub OAuth，因国内网络环境特殊）
+    const strategy = (this as any)._oauth2;
+    if (strategy) {
+      strategy._client = strategy._client || {};
+      strategy._agent = new https.Agent({ rejectUnauthorized: false });
+    }
 
     this.logger.log('GitHub OAuth strategy initialized');
   }

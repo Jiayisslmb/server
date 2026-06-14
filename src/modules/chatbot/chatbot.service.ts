@@ -30,6 +30,7 @@ interface TokenStats {
 interface SendMessageOptions {
   userId?: number;
   conversationId?: number;
+  mode?: 'fast' | 'deep' | 'auto';
 }
 
 interface ToolCall {
@@ -89,6 +90,35 @@ const TOOLS = [
           query: { type: 'string', description: '用户名或用户ID' },
         },
         required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'search_users',
+      description: '模糊搜索DeSocial平台用户，支持按昵称、用户名关键词搜索。返回匹配的用户列表。',
+      parameters: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string', description: '搜索关键词' },
+          limit: { type: 'integer', description: '返回数量', default: 10 },
+        },
+        required: ['keyword'],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'get_user_profile',
+      description: '获取指定用户的详细公开信息，包括头像URL、背景URL、个人简介、统计数据。返回头像URL可供视觉识别。',
+      parameters: {
+        type: 'object',
+        properties: {
+          userId: { type: 'integer', description: '用户ID' },
+        },
+        required: ['userId'],
       },
     },
   },
@@ -700,19 +730,30 @@ export class ChatbotService implements OnModuleInit {
     options?: SendMessageOptions,
   ) {
     const userId = options?.userId;
-    const conversationId = options?.conversationId;
+    let conversationId = options?.conversationId;
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
     const queryText = lastUserMsg?.content || '';
+
+    // Auto-create conversation if userId present but no conversationId
+    if (userId && !conversationId) {
+      try {
+        const title = queryText.slice(0, 30) || '新对话';
+        const conv = await this.createConversation(userId, title);
+        conversationId = conv.id;
+        // Send conversationId to frontend
+        subscriber.next(JSON.stringify({ conversationId: conv.id }));
+      } catch (err) {
+        this.logger.warn('Auto-create conversation failed:', err);
+      }
+    }
 
     // ── Route: Image Generation → Wanx ──────────────────────────────────
     if (this.dashscopeApiKey && this.isImageGenerationRequest(messages)) {
       try {
+        subscriber.next('🔍 正在生成图片...');
         const imageUrl = await this.generateImage(queryText);
-        const responseText = `已为你生成图片：\n![生成的图片](${imageUrl})`;
-        for (const char of responseText) {
-          subscriber.next(char);
-          await this.delay(20);
-        }
+        const responseText = `已为你生成图片：\n\n![生成的图片](${imageUrl})`;
+        subscriber.next(responseText);
         if (conversationId) {
           await this.saveMessage(conversationId, 'user', queryText, this.estimateTokens(queryText), 0);
           await this.saveMessage(conversationId, 'assistant', responseText, 0, this.estimateTokens(responseText), imageUrl);
@@ -732,7 +773,9 @@ export class ChatbotService implements OnModuleInit {
     }
 
     // ── Route: Pure Text → DeepSeek (fast or deep) ──────────────────────
-    const mode = this.classifyQuery(queryText);
+    const mode = options?.mode === 'fast' ? 'fast'
+      : options?.mode === 'deep' ? 'deep'
+      : this.classifyQuery(queryText);
 
     // RAG context (deep mode only)
     let ragContext: string[] = [];
@@ -1100,18 +1143,30 @@ export class ChatbotService implements OnModuleInit {
 
     const data = await response.json();
 
-    // Check for direct result
-    if (data?.output?.results?.[0]?.url) {
-      return data.output.results[0].url;
+    // Get the OSS URL and download image to avoid signature expiry
+    let ossUrl = data?.output?.results?.[0]?.url;
+    if (!ossUrl) {
+      const taskId = data?.output?.task_id;
+      if (taskId) {
+        ossUrl = await this.pollWanxTask(taskId);
+      }
     }
 
-    // Check for async task — poll for completion
-    const taskId = data?.output?.task_id;
-    if (taskId) {
-      return this.pollWanxTask(taskId);
+    if (!ossUrl) {
+      throw new Error(`Unexpected Wanx response: ${JSON.stringify(data)}`);
     }
 
-    throw new Error(`Unexpected Wanx response: ${JSON.stringify(data)}`);
+    // Download image and convert to base64 data URL
+    try {
+      const imgResp = await fetch(ossUrl);
+      const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
+      const base64 = imgBuffer.toString('base64');
+      const contentType = imgResp.headers.get('content-type') || 'image/png';
+      return `data:${contentType};base64,${base64}`;
+    } catch {
+      // Fallback: return original URL if download fails
+      return ossUrl;
+    }
   }
 
   private async pollWanxTask(taskId: string): Promise<string> {
@@ -1179,6 +1234,10 @@ export class ChatbotService implements OnModuleInit {
           return this.toolGetTrendingTopics(args);
         case 'get_user_info':
           return this.toolGetUserInfo(args);
+        case 'search_users':
+          return this.toolSearchUsers(args);
+        case 'get_user_profile':
+          return this.toolGetUserProfile(args);
         case 'get_circles':
           return this.toolGetCircles(args);
         case 'get_help_docs':
@@ -1330,7 +1389,76 @@ export class ChatbotService implements OnModuleInit {
       username: user.username,
       nickname: user.nickname,
       bio: user.bio,
-      avatarCid: user.avatarCid,
+      avatarUrl: user.avatarCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${user.avatarCid}` : null,
+      followers: user._count?.userfollows_userfollows_followerIdTouser || 0,
+      following: user._count?.userfollows_userfollows_followingIdTouser || 0,
+      createdAt: user.createdAt,
+    };
+  }
+
+  private async toolSearchUsers(args: { keyword?: string; limit?: number }) {
+    const keyword = args.keyword?.trim();
+    if (!keyword) return { error: '请提供搜索关键词' };
+    const limit = Math.min(args.limit || 10, 20);
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        isFrozen: false,
+        OR: [
+          { username: { contains: keyword } },
+          { nickname: { contains: keyword } },
+          { bio: { contains: keyword } },
+        ],
+      },
+      take: limit,
+      select: {
+        id: true,
+        username: true,
+        nickname: true,
+        bio: true,
+        avatarCid: true,
+      },
+    });
+
+    return users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      nickname: u.nickname,
+      bio: u.bio?.slice(0, 100),
+      avatarUrl: u.avatarCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${u.avatarCid}` : null,
+    }));
+  }
+
+  private async toolGetUserProfile(args: { userId?: number }) {
+    const userId = args.userId;
+    if (!userId) return { error: '请提供用户ID' };
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true, username: true, nickname: true, bio: true,
+        avatarCid: true, backgroundCid: true,
+        createdAt: true,
+        _count: {
+          select: {
+            article: true, moment: true,
+            userfollows_userfollows_followerIdTouser: true,
+            userfollows_userfollows_followingIdTouser: true,
+          },
+        },
+      },
+    });
+
+    if (!user) return { message: `未找到用户ID ${userId}` };
+
+    return {
+      id: user.id,
+      username: user.username,
+      nickname: user.nickname,
+      bio: user.bio,
+      avatarUrl: user.avatarCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${user.avatarCid}` : null,
+      backgroundUrl: user.backgroundCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${user.backgroundCid}` : null,
+      posts: (user._count?.article || 0) + (user._count?.moment || 0),
       followers: user._count?.userfollows_userfollows_followerIdTouser || 0,
       following: user._count?.userfollows_userfollows_followingIdTouser || 0,
       createdAt: user.createdAt,

@@ -122,6 +122,13 @@ export class GitHubAuthController {
       return { success: false, message: '缺少授权码' };
     }
 
+    // 先检查缓存（防重复请求）
+    const cachedKey = `github_oauth:cached:${code}`;
+    const cached = await this.redis.get(cachedKey);
+    if (cached) {
+      try { return { success: true, ...JSON.parse(cached) }; } catch {}
+    }
+
     const codeKey = `github_oauth:${code}`;
     const codeData = await this.redis.get(codeKey);
 
@@ -129,7 +136,9 @@ export class GitHubAuthController {
       return { success: false, message: '授权码无效或已过期' };
     }
 
-    // 一次性使用，立即删除
+    // 缓存 10 秒防 React StrictMode/Suspense 双重请求
+    await this.redis.set(cachedKey, codeData, 10);
+    // 删除原 key（一次性使用）
     await this.redis.del(codeKey);
 
     try {
