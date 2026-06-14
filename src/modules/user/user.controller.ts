@@ -13,14 +13,18 @@ import {
   HttpStatus,
   Req,
   BadRequestException,
+  NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import { ConfigService } from '@nestjs/config';
 import { UserService } from './user.service';
 import { CreateUserDto, LoginDto, UpdateUserDto } from './dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { ParseIntPipe } from '@nestjs/common';
 import { AdminService } from '../admin/admin.service';
 import { RedisService } from 'src/config/redis.service';
+import { EmailService } from 'src/common/services/email.service';
 import type { Request as ExpressRequest } from 'express';
 
 @Controller('users')
@@ -29,6 +33,8 @@ export class UserController {
     private readonly userService: UserService,
     private readonly adminService: AdminService,
     private readonly redis: RedisService,
+    private readonly emailService: EmailService,
+    private readonly configService: ConfigService,
   ) {}
 
   private async checkRegistrationRateLimit(ip: string): Promise<void> {
@@ -63,6 +69,16 @@ export class UserController {
     const ip = this.getClientIp(req);
     await this.checkRegistrationRateLimit(ip);
 
+    const turnstileConfigured = !!this.configService.get<string>('TURNSTILE_SECRET_KEY');
+
+    // Turnstile 模式：前端已验证 Turnstile，跳过数学验证码
+    if (turnstileConfigured && createUserDto.captchaKey === 'turnstile') {
+      // Turnstile token 已由前端通过 /api/auth/verify-turnstile 验证
+      // 直接进入注册逻辑
+      return this.userService.create(createUserDto);
+    }
+
+    // 数学验证码模式
     if (!createUserDto.captchaKey || !createUserDto.captchaAnswer) {
       throw new BadRequestException('请提供验证码');
     }
@@ -294,6 +310,98 @@ export class UserController {
       body.oldPassword,
       body.newPassword,
     );
+  }
+
+  // 注销账号（需要登录 + 密码验证）
+  @Delete('account')
+  @UseGuards(JwtAuthGuard)
+  async deleteAccount(
+    @Request() req,
+    @Body() body: { password: string },
+  ) {
+    if (!body.password) {
+      throw new BadRequestException('请提供密码以确认注销');
+    }
+    return this.userService.deleteAccount(req.user.id, body.password);
+  }
+
+  // 修改邮箱（需要登录 + 密码验证）
+  @Post('change-email')
+  @UseGuards(JwtAuthGuard)
+  async changeEmail(
+    @Request() req,
+    @Body() body: { newEmail: string; password: string },
+  ) {
+    if (!body.newEmail || !body.password) {
+      throw new BadRequestException('请提供新邮箱和当前密码');
+    }
+
+    // 验证邮箱格式
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(body.newEmail)) {
+      throw new BadRequestException('邮箱格式不正确');
+    }
+
+    // 检查邮箱是否已被使用
+    const existingUser = await this.userService.findByEmail(body.newEmail);
+    if (existingUser && existingUser.id !== req.user.id) {
+      throw new ConflictException('该邮箱已被其他用户使用');
+    }
+
+    return this.userService.changeEmail(req.user.id, body.newEmail, body.password);
+  }
+
+  // 发送邮箱验证码（需要登录，用于验证邮箱所有权）
+  @Post('send-email-verification')
+  @UseGuards(JwtAuthGuard)
+  async sendEmailVerification(@Request() req) {
+    const user = await this.userService.findById(req.user.id);
+    if (!user.email) {
+      throw new BadRequestException('请先设置邮箱地址');
+    }
+    if (user.emailVerified) {
+      return { success: true, message: '邮箱已验证，无需重复验证' };
+    }
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const key = `email:verify:${user.email}`;
+    await this.redis.set(key, code, 300);
+
+    const sent = await this.emailService.sendVerificationCode(user.email, code);
+    if (!sent) {
+      throw new BadRequestException('邮件服务未配置，请联系管理员或稍后重试');
+    }
+
+    return { success: true, message: '验证码已发送' };
+  }
+
+  // 验证邮箱
+  @Post('verify-email')
+  @UseGuards(JwtAuthGuard)
+  async verifyEmail(
+    @Request() req,
+    @Body() body: { code: string },
+  ) {
+    if (!body.code) {
+      throw new BadRequestException('请提供验证码');
+    }
+
+    const user = await this.userService.findById(req.user.id);
+    if (!user.email) {
+      throw new BadRequestException('请先设置邮箱地址');
+    }
+
+    const key = `email:verify:${user.email}`;
+    const storedCode = await this.redis.get(key);
+
+    if (!storedCode || storedCode !== body.code) {
+      throw new BadRequestException('验证码错误或已过期');
+    }
+
+    await this.redis.del(key);
+    await this.userService.verifyEmail(req.user.id);
+
+    return { success: true, message: '邮箱验证成功' };
   }
 
   // 获取用户统计信息（粉丝数、关注数等）

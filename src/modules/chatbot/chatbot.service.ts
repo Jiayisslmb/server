@@ -994,10 +994,13 @@ export class ChatbotService implements OnModuleInit {
     const fs = require('fs');
     const path = require('path');
     const os = require('os');
-    const { execFile } = require('child_process');
+    const { exec } = require('child_process');
 
     const tmpDir = os.tmpdir();
-    const tmpFile = path.join(tmpDir, `desocial-img-${Date.now()}.png`);
+    // Detect image extension from data URL
+    const extMatch = imageUrl.match(/^data:image\/(\w+);/);
+    const ext = extMatch ? extMatch[1] : 'png';
+    const tmpFile = path.join(tmpDir, `desocial-img-${Date.now()}.${ext}`);
 
     try {
       if (imageUrl.startsWith('data:')) {
@@ -1013,14 +1016,9 @@ export class ChatbotService implements OnModuleInit {
         return;
       }
 
+      const cmd = `bl omni --model qwen3.5-omni-plus --image "${tmpFile}" --message "${userText.replace(/"/g, '\\"')}" --system "请始终使用中文回复。" --text-only --non-interactive --output json`;
       const result = await new Promise<string>((resolve, reject) => {
-        execFile('bl', [
-          'vision', 'describe',
-          '--model', 'qwen3-vl-flash-2026-01-22',
-          '--image', tmpFile,
-          '--non-interactive',
-          '--output', 'json',
-        ], { timeout: 30000 }, (err: any, stdout: string, stderr: string) => {
+        exec(cmd, { timeout: 30000, shell: 'cmd.exe', windowsHide: true }, (err: any, stdout: string, stderr: string) => {
           try { fs.unlinkSync(tmpFile); } catch {}
           if (err) { reject(new Error(stderr || err.message)); return; }
           resolve(stdout);

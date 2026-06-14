@@ -26,6 +26,17 @@ export class UserService {
       throw new ConflictException('用户名已被占用');
     }
 
+    // 如果提供了邮箱，检查是否已被占用
+    if (createUserDto.email) {
+      const existingEmail = await this.prisma.user.findUnique({
+        where: { email: createUserDto.email },
+        select: { id: true },
+      });
+      if (existingEmail) {
+        throw new ConflictException('该邮箱已被注册');
+      }
+    }
+
     const passwordValidation = await this.adminSecurity.validatePasswordStrength(createUserDto.password);
     if (!passwordValidation.valid) {
       throw new BadRequestException(`密码强度不足: ${passwordValidation.errors.join(', ')}`);
@@ -39,6 +50,7 @@ export class UserService {
         password: hashedPassword,
         nickname: createUserDto.nickname || null,
         bio: createUserDto.bio,
+        email: createUserDto.email || null,
         updatedAt: new Date(),
       },
       select: {
@@ -48,6 +60,7 @@ export class UserService {
         avatarCid: true,
         bio: true,
         isAdmin: true,
+        email: true,
         createdAt: true,
       },
     });
@@ -94,6 +107,8 @@ export class UserService {
         colorScheme: true,
         defaultVisibility: true,
         bio: true,
+        email: true,
+        emailVerified: true,
         isAdmin: true,
         isFrozen: true,
         mfaEnabled: true,
@@ -105,6 +120,9 @@ export class UserService {
         allowMessage: true,
         hideFollowing: true,
         hideFollowers: true,
+        website: true,
+        location: true,
+        notificationPreferences: true,
       },
     });
 
@@ -141,6 +159,7 @@ export class UserService {
     password: string;
     nickname?: string;
     avatarUrl?: string;
+    email?: string;
   }) {
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
@@ -151,6 +170,7 @@ export class UserService {
         password: hashedPassword,
         nickname: data.nickname || null,
         avatarUrl: data.avatarUrl || null,
+        email: data.email || null,
         updatedAt: new Date(),
       },
       select: {
@@ -162,6 +182,7 @@ export class UserService {
         bio: true,
         isAdmin: true,
         isFrozen: true,
+        email: true,
         createdAt: true,
       },
     });
@@ -180,6 +201,8 @@ export class UserService {
         globalBackgroundCid: true,
         globalBackgroundColor: true,
         bio: true,
+        email: true,
+        emailVerified: true,
         isAdmin: true,
         isFrozen: true,
         mfaEnabled: true,
@@ -190,6 +213,9 @@ export class UserService {
         allowMessage: true,
         hideFollowing: true,
         hideFollowers: true,
+        website: true,
+        location: true,
+        notificationPreferences: true,
         _count: {
           select: {
             article: true,
@@ -295,6 +321,21 @@ export class UserService {
       }
     }
 
+    // 邮箱唯一性检查
+    if (updateUserDto.email) {
+      const existingEmail = await this.prisma.user.findFirst({
+        where: {
+          email: updateUserDto.email,
+          id: { not: id },
+        },
+      });
+      if (existingEmail) {
+        throw new ConflictException('该邮箱已被其他用户使用');
+      }
+      // 修改邮箱时重置验证状态
+      (updateUserDto as any).emailVerified = false;
+    }
+
     return this.prisma.user.update({
       where: { id },
       data: updateUserDto,
@@ -312,6 +353,8 @@ export class UserService {
         colorScheme: true,
         defaultVisibility: true,
         bio: true,
+        email: true,
+        emailVerified: true,
         allowFollow: true,
         allowMessage: true,
         hideFollowing: true,
@@ -628,6 +671,65 @@ export class UserService {
     this.logger.log(`用户 ${userId} 修改了密码`);
 
     return { message: '密码修改成功' };
+  }
+
+  async changeEmail(userId: number, newEmail: string, password: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      throw new BadRequestException('密码错误');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        email: newEmail,
+        emailVerified: false,
+        emailVerifyToken: null,
+        emailVerifyTokenExpires: null,
+        updatedAt: new Date(),
+      },
+    });
+
+    this.logger.log(`用户 ${userId} 修改了邮箱为 ${newEmail}`);
+    return { success: true, message: '邮箱修改成功，请验证新邮箱' };
+  }
+
+  async verifyEmail(userId: number) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        emailVerified: true,
+        emailVerifyToken: null,
+        emailVerifyTokenExpires: null,
+        updatedAt: new Date(),
+      },
+    });
+
+    this.logger.log(`用户 ${userId} 邮箱验证成功`);
+    return { success: true, message: '邮箱验证成功' };
+  }
+
+  async deleteAccount(userId: number, password: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      throw new BadRequestException('密码错误');
+    }
+
+    // 删除用户所有关联数据（级联删除由 Prisma schema 的 onDelete: Cascade 处理）
+    await this.prisma.user.delete({ where: { id: userId } });
+
+    this.logger.log(`用户 ${userId} 已注销账号`);
+    return { success: true, message: '账号已注销' };
   }
 
   async getUserStats(userId: number) {

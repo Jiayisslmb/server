@@ -24,12 +24,15 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
       throw new Error('GitHub OAuth credentials not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.');
     }
 
+    // state: 'true' 启用 Passport 自动 state 验证（CSRF 防护）
+    // @types/passport-github2 类型定义过时，实际 passport 0.6+ 支持 boolean
     super({
       clientID,
       clientSecret,
       callbackURL: callbackURL || 'http://localhost:3001/api/auth/github/callback',
       scope: ['user:email'],
-    });
+      state: 'true',
+    } as any);
 
     this.logger.log('GitHub OAuth strategy initialized');
   }

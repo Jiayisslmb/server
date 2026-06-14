@@ -1,6 +1,6 @@
 //更新资料用
 
-import { IsOptional, IsString, IsBoolean, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsBoolean, IsEmail, MaxLength } from 'class-validator';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -52,6 +52,22 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   defaultVisibility?: string;
+
+  @IsOptional()
+  @IsEmail({}, { message: '邮箱格式不正确' })
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  website?: string;
+
+  @IsOptional()
+  @IsString()
+  location?: string;
+
+  @IsOptional()
+  @IsString()
+  notificationPreferences?: string;
 
   @IsOptional()
   @IsBoolean()

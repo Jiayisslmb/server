@@ -1,4 +1,4 @@
-import { IsString, MinLength, MaxLength, IsOptional } from 'class-validator';
+import { IsString, MinLength, MaxLength, IsOptional, IsEmail } from 'class-validator';
 
 export class CreateUserDto {
   @IsString()
@@ -17,6 +17,10 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   nickname?: string;
+
+  @IsOptional()
+  @IsEmail({}, { message: '邮箱格式不正确' })
+  email?: string;
 
   @IsString()
   captchaKey: string;

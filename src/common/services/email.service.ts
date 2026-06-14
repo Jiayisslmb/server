@@ -19,9 +19,26 @@ export class EmailService {
         secure: this.configService.get('SMTP_SECURE') === 'true',
         auth: { user, pass },
       });
-      this.logger.log('邮件服务已配置');
+      this.logger.log('✅ 邮件服务已配置');
     } else {
-      this.logger.warn('SMTP 未配置，邮件功能将以模拟模式运行');
+      this.logger.warn('');
+      this.logger.warn('╔══════════════════════════════════════════════════════════╗');
+      this.logger.warn('║  ⚠️  SMTP 未配置 — 邮件功能将以模拟模式运行            ║');
+      this.logger.warn('║                                                        ║');
+      this.logger.warn('║  以下功能将不可用：                                     ║');
+      this.logger.warn('║  • 邮箱验证码登录                                       ║');
+      this.logger.warn('║  • 密码重置                                             ║');
+      this.logger.warn('║  • 邮箱验证                                             ║');
+      this.logger.warn('║                                                        ║');
+      this.logger.warn('║  请在 .env 中配置以下变量：                             ║');
+      this.logger.warn('║  SMTP_HOST=     (如 smtp.resend.com)                   ║');
+      this.logger.warn('║  SMTP_USER=     (SMTP 用户名 / API Key)               ║');
+      this.logger.warn('║  SMTP_PASS=     (SMTP 密码 / API Secret)              ║');
+      this.logger.warn('║  SMTP_PORT=587                                         ║');
+      this.logger.warn('║  SMTP_SECURE=false                                     ║');
+      this.logger.warn('║  SMTP_FROM=     (如 noreply@desocial.top)             ║');
+      this.logger.warn('╚══════════════════════════════════════════════════════════╝');
+      this.logger.warn('');
     }
   }
 

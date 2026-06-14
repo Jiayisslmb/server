@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/config/prisma.service';
 import { RedisService } from 'src/config/redis.service';
 
@@ -191,6 +191,11 @@ export class TopicsService {
   }
 
   async createTopic(name: string, description?: string) {
+    const reservedWords = ['search', 'hot', 'trending', 'hot-search'];
+    if (reservedWords.includes(name.toLowerCase())) {
+      throw new ConflictException('话题名称与系统保留关键字冲突，请使用其他名称');
+    }
+
     const existingTopic = await this.prisma.topic.findUnique({
       where: { name },
     });
@@ -261,7 +266,7 @@ export class TopicsService {
       },
     });
 
-    if (!topic) return null;
+    if (!topic) throw new NotFoundException('话题不存在');
 
     // 拆分为 3 次独立轻量查询，避免单次巨型嵌套查询导致 MySQL 崩溃
     const [articleTopics, momentTopics] = await Promise.all([

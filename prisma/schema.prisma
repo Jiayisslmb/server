@@ -388,6 +388,9 @@ model user {
   emailVerified                             Boolean             @default(false)
   emailVerifyToken                          String?             @db.VarChar(255)
   emailVerifyTokenExpires                   DateTime?
+  website                                  String?             @db.VarChar(255)
+  location                                 String?             @db.VarChar(100)
+  notificationPreferences                  String?             @db.Text
   adminauditlog                             adminauditlog[]
   adminsession                              adminsession[]
   article                                   article[]
@@ -407,6 +410,8 @@ model user {
   report                                    report[]
   userfollows_userfollows_followerIdTouser  userfollows[]       @relation("userfollows_followerIdTouser")
   userfollows_userfollows_followingIdTouser userfollows[]       @relation("userfollows_followingIdTouser")
+  AiConversation                            AiConversation[]
+  AiUserProfile                             AiUserProfile?
 
   @@index([adminDeviceFingerprint], map: "User_adminDeviceFingerprint_idx")
   @@index([githubId], map: "User_githubId_idx")
@@ -453,4 +458,50 @@ model adminauditlog {
   @@index([userId], map: "AdminAuditLog_userId_fkey")
   @@index([action], map: "AdminAuditLog_action_idx")
   @@index([createdAt], map: "AdminAuditLog_createdAt_idx")
+}
+
+model AiConversation {
+  id        Int          @id @default(autoincrement())
+  userId    Int
+  title     String       @db.VarChar(100)
+  model     String       @default("deepseek-v4-pro") @db.VarChar(50)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  messages  AiMessage[]
+  user      user         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             Int            @id @default(autoincrement())
+  conversationId Int
+  role           String         @db.VarChar(20)
+  content        String         @db.Text
+  imageUrl       String?        @db.VarChar(500)
+  tokenInput     Int?
+  tokenOutput    Int?
+  createdAt      DateTime       @default(now())
+  conversation   AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model AiDocument {
+  id        Int      @id @default(autoincrement())
+  title     String   @db.VarChar(200)
+  content   String   @db.LongText
+  source    String   @db.VarChar(100)
+  embedding String?  @db.LongText
+  createdAt DateTime @default(now())
+
+  @@index([source])
+}
+
+model AiUserProfile {
+  userId    Int     @id
+  language  String? @db.VarChar(10)
+  interests String? @db.Text
+  expertise String? @db.VarChar(50)
+  user      user    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

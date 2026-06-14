@@ -1,4 +1,4 @@
-import { Controller, Get, Req, Res, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Req, Res, UseGuards, Logger, Body, HttpCode } from '@nestjs/common';
 import { GitHubAuthGuard } from './github-auth.guard';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -6,6 +6,7 @@ import type { Response } from 'express';
 import type { GitHubProfile } from './github.strategy';
 import { UserService } from '../user/user.service';
 import { RedisService } from 'src/config/redis.service';
+import { AuthService } from './auth.service';
 import * as crypto from 'crypto';
 
 interface GitHubUserInfo {
@@ -26,6 +27,7 @@ export class GitHubAuthController {
     private configService: ConfigService,
     private userService: UserService,
     private redis: RedisService,
+    private authService: AuthService,
   ) {
     this.frontendUrl = configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
   }
@@ -60,6 +62,7 @@ export class GitHubAuthController {
           password: randomPassword,
           nickname: githubProfile.displayName || githubProfile.username,
           avatarUrl: githubProfile.avatarUrl,
+          email: githubProfile.email || undefined,
         });
 
         this.logger.log(`New user created via GitHub: ${username} (github_id: ${githubProfile.id})`);
@@ -79,20 +82,61 @@ export class GitHubAuthController {
       const refreshKey = `refresh:${user.id}:${refreshToken}`;
       await this.redis.set(refreshKey, user.id.toString(), this.refreshTokenExpiry);
 
+      // 设置 httpOnly cookie（生产环境 secure）
+      const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
       res.cookie('token', accessToken, {
-        httpOnly: false,
-        secure: false,
+        httpOnly: true,
+        secure: isProduction,
         sameSite: 'lax' as const,
         maxAge: this.refreshTokenExpiry * 1000,
         path: '/',
       });
 
+      // 生成临时授权码，避免 Token 暴露在 URL 中
+      const authCode = crypto.randomBytes(16).toString('hex');
+      const codeKey = `github_oauth:${authCode}`;
+      const codeData = JSON.stringify({
+        accessToken,
+        refreshToken,
+        userId: user.id,
+        isAdmin: user.isAdmin || false,
+      });
+      await this.redis.set(codeKey, codeData, 300); // 5 分钟有效期
+
       res.redirect(
-        `${this.frontendUrl}/?github_auth=success&token=${accessToken}&refreshToken=${refreshToken}&userId=${user.id}&isAdmin=${user.isAdmin || false}`,
+        `${this.frontendUrl}/?github_auth=success&code=${authCode}`,
       );
     } catch (error: any) {
       this.logger.error(`GitHub auth callback error: ${error.message}`);
       res.redirect(`${this.frontendUrl}/auth/sign-in?error=github_auth_failed`);
+    }
+  }
+
+  /**
+   * 用临时授权码交换 Token（避免 Token 暴露在 URL 中）
+   */
+  @Post('github/exchange')
+  @HttpCode(200)
+  async exchangeCode(@Body('code') code: string) {
+    if (!code) {
+      return { success: false, message: '缺少授权码' };
+    }
+
+    const codeKey = `github_oauth:${code}`;
+    const codeData = await this.redis.get(codeKey);
+
+    if (!codeData) {
+      return { success: false, message: '授权码无效或已过期' };
+    }
+
+    // 一次性使用，立即删除
+    await this.redis.del(codeKey);
+
+    try {
+      const data = JSON.parse(codeData);
+      return { success: true, ...data };
+    } catch {
+      return { success: false, message: '授权码解析失败' };
     }
   }
 

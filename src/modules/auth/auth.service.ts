@@ -139,6 +139,8 @@ export class AuthService {
           globalBackgroundCid: user.globalBackgroundCid,
           globalBackgroundColor: user.globalBackgroundColor,
           bio: user.bio,
+          email: user.email,
+          emailVerified: user.emailVerified,
           isAdmin: user.isAdmin,
           language: user.language,
           fontSize: user.fontSize,
@@ -528,6 +530,8 @@ export class AuthService {
         username: user.username,
         nickname: user.nickname,
         avatarCid: user.avatarCid,
+        email: user.email,
+        emailVerified: user.emailVerified,
         isAdmin: user.isAdmin,
       },
     };
@@ -578,6 +582,15 @@ export class AuthService {
 
     const user = await this.userService.findByEmail(email);
     if (!user) throw new NotFoundException('用户不存在');
+
+    // 密码强度验证
+    if (newPassword.length < 6) {
+      throw new BadRequestException('新密码长度不能少于6位');
+    }
+    const passwordValidation = await this.adminSecurity.validatePasswordStrength(newPassword);
+    if (!passwordValidation.valid) {
+      throw new BadRequestException(`密码强度不足: ${passwordValidation.errors.join(', ')}`);
+    }
 
     await this.userService.updatePassword(user.id, newPassword);
     await this.redis.del(tokenKey);

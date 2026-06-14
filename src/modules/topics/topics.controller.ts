@@ -27,17 +27,6 @@ export class TopicsController {
     return this.topicsService.recordSearch(keyword);
   }
 
-  @Get()
-  getAllTopics(
-    @Query('skip') skip?: string,
-    @Query('take') take?: string,
-  ) {
-    return this.topicsService.getTopics(
-      parseInt(skip || '0'),
-      parseInt(take || '20'),
-    );
-  }
-
   @Get('search')
   searchTopics(
     @Query('keyword') keyword: string,
@@ -46,6 +35,17 @@ export class TopicsController {
   ) {
     return this.topicsService.searchTopics(
       keyword,
+      parseInt(skip || '0'),
+      parseInt(take || '20'),
+    );
+  }
+
+  @Get()
+  getAllTopics(
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
+  ) {
+    return this.topicsService.getTopics(
       parseInt(skip || '0'),
       parseInt(take || '20'),
     );

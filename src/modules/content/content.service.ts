@@ -613,7 +613,7 @@ export class ContentService {
       select: { id: true, username: true, nickname: true },
     });
 
-    const repostContent = `转发动态\n「${moment.content.substring(0, 100)}${moment.content.length > 100 ? '...' : ''}」—— @${moment.user.username}`;
+    const repostContent = `转发动态\n「${moment.content.substring(0, 100)}${moment.content.length > 100 ? '...' : ''}」—— @${moment.user.username}\n\n原文链接: /content/moment/${moment.id}`;
 
     const repostMoment = await this.prisma.moment.create({
       data: {
@@ -1275,7 +1275,7 @@ export class ContentService {
       select: { id: true, username: true, nickname: true },
     });
 
-    const repostContent = `转发文章\n「${article.title || article.content.substring(0, 100)}${article.content.length > 100 ? '...' : ''}」—— @${article.user.username}`;
+    const repostContent = `转发文章\n「${article.title || article.content.substring(0, 100)}${article.content.length > 100 ? '...' : ''}」—— @${article.user.username}\n\n原文链接: /content/article/${articleId}`;
 
     const repostMoment = await this.prisma.moment.create({
       data: {

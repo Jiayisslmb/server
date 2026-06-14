@@ -76,8 +76,8 @@ async function bootstrap() {
   }));
 
   // 请求体大小限制 — 防止大 payload 攻击
-  app.use(json({ limit: '1mb' }));
-  app.use(urlencoded({ extended: true, limit: '1mb' }));
+  app.use(json({ limit: '10mb' }));
+  app.use(urlencoded({ extended: true, limit: '10mb' }));
 
   // DDoS 基础防护中间件
   const ipRequestCounts = new Map<string, { count: number; resetAt: number }>();

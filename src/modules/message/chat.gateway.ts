@@ -255,15 +255,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload?: { timestamp?: number; active?: boolean },
   ) {
     const userId = this.socketToUser.get(client.id);
-    
+
     if (!userId) {
       client.emit('error', { message: '未认证的连接', code: 'NOT_AUTHENTICATED' });
       return;
     }
 
+    // 检查用户是否被冻结
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { isFrozen: true },
+      });
+      if (user?.isFrozen) {
+        this.logger.warn(`用户 ${userId} 已被冻结，断开 WebSocket 连接`);
+        client.emit('error', { message: '账号已被冻结', code: 'USER_FROZEN' });
+        setTimeout(() => client.disconnect(), 100);
+        return;
+      }
+    } catch (err) {
+      // 数据库查询失败不阻断心跳
+    }
+
     const userSocket = this.userSockets.get(userId);
     const now = Date.now();
-    
+
     if (userSocket) {
       userSocket.lastHeartbeat.set(client.id, now);
       if (payload?.active) {
