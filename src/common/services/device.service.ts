@@ -179,8 +179,10 @@ export class DeviceService {
       const ram = raw.deviceMemory && raw.deviceMemory > 0
         ? `${raw.deviceMemory}GB` : '';
       const hw = [cpu, ram].filter(Boolean).join('/');
-      if (hw) deviceNameParts.pop(); // remove OS, merge with hw
-      deviceNameParts.push(hw ? `${os} (${hw})` : os);
+      if (hw) {
+        deviceNameParts.pop(); // replace plain OS with "OS (HW)"
+        deviceNameParts.push(`${os} (${hw})`);
+      }
     }
 
     deviceNameParts.push(browser);
