@@ -442,6 +442,8 @@ export class UserController {
       select: {
         id: true,
         deviceName: true,
+        deviceType: true,
+        deviceUUID: true,
         os: true,
         browser: true,
         ipAddress: true,

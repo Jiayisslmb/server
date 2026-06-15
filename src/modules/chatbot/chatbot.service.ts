@@ -97,7 +97,7 @@ const TOOLS = [
     type: 'function' as const,
     function: {
       name: 'search_users',
-      description: '模糊搜索DeSocial平台用户，支持按昵称、用户名关键词搜索。返回匹配的用户列表。',
+      description: '搜索DeSocial平台用户。支持按昵称、用户名、简介、头像视觉描述(avatarDescription)搜索。例如搜索"初音未来"或"蓝色头发"可按头像内容找到用户。返回含头像URL和头像描述的匹配用户列表。',
       parameters: {
         type: 'object',
         properties: {
@@ -171,6 +171,11 @@ const SYSTEM_PROMPT_BASE = `你是去中心化社交平台"DeSocial"的专属AI�
 - 话题标签：文章和动态可关联话题，发现热门内容
 - 通知系统：点赞、评论、关注等实时通知
 - 管理面板：用户管理、内容审核、数据统计
+
+工具使用技巧：
+- search_users可用于按头像内容和视觉特征搜索用户（支持avatarDescription字段匹配）
+- 当用户要求找特定头像的用户时，直接用search_users搜索相关关键词（如"初音""动漫""蓝色"）
+- get_user_profile可获取用户头像URL和视觉描述，供进一步分析
 
 回复规则：
 1. 仅回答与平台功能、使用方法、技术原理相关的问题
@@ -1353,6 +1358,7 @@ export class ChatbotService implements OnModuleInit {
           nickname: true,
           bio: true,
           avatarCid: true,
+          avatarDescription: true,
           createdAt: true,
           _count: {
             select: {
@@ -1371,6 +1377,7 @@ export class ChatbotService implements OnModuleInit {
           nickname: true,
           bio: true,
           avatarCid: true,
+          avatarDescription: true,
           createdAt: true,
           _count: {
             select: {
@@ -1390,6 +1397,7 @@ export class ChatbotService implements OnModuleInit {
       nickname: user.nickname,
       bio: user.bio,
       avatarUrl: user.avatarCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${user.avatarCid}` : null,
+      avatarDescription: user.avatarDescription,
       followers: user._count?.userfollows_userfollows_followerIdTouser || 0,
       following: user._count?.userfollows_userfollows_followingIdTouser || 0,
       createdAt: user.createdAt,
@@ -1408,6 +1416,7 @@ export class ChatbotService implements OnModuleInit {
           { username: { contains: keyword } },
           { nickname: { contains: keyword } },
           { bio: { contains: keyword } },
+          { avatarDescription: { contains: keyword } },
         ],
       },
       take: limit,
@@ -1417,6 +1426,7 @@ export class ChatbotService implements OnModuleInit {
         nickname: true,
         bio: true,
         avatarCid: true,
+        avatarDescription: true,
       },
     });
 
@@ -1426,6 +1436,7 @@ export class ChatbotService implements OnModuleInit {
       nickname: u.nickname,
       bio: u.bio?.slice(0, 100),
       avatarUrl: u.avatarCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${u.avatarCid}` : null,
+      avatarDescription: u.avatarDescription,
     }));
   }
 
@@ -1437,7 +1448,7 @@ export class ChatbotService implements OnModuleInit {
       where: { id: userId },
       select: {
         id: true, username: true, nickname: true, bio: true,
-        avatarCid: true, backgroundCid: true,
+        avatarCid: true, backgroundCid: true, avatarDescription: true,
         createdAt: true,
         _count: {
           select: {
@@ -1451,12 +1462,44 @@ export class ChatbotService implements OnModuleInit {
 
     if (!user) return { message: `未找到用户ID ${userId}` };
 
+    // Lazy-generate avatar description if user has avatar but no description
+    let avatarDescription = user.avatarDescription;
+    if (user.avatarCid && !avatarDescription) {
+      try {
+        const avatarUrl = `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${user.avatarCid}`;
+        const { exec } = require('child_process');
+        const cmd = `bl omni --model qwen3.5-omni-plus --image "${avatarUrl}" --message "描述图片内容，用中文一句话" --text-only --non-interactive --output json`;
+        const result = await new Promise<string>((resolve, reject) => {
+          exec(cmd, { timeout: 20000, shell: 'cmd.exe', windowsHide: true },
+            (err: any, stdout: string, stderr: string) => {
+              if (err) { reject(new Error(stderr || err.message)); return; }
+              resolve(stdout);
+            });
+        });
+        try {
+          const parsed = JSON.parse(result);
+          avatarDescription = parsed.content || '';
+        } catch {
+          avatarDescription = result.trim();
+        }
+        if (avatarDescription) {
+          await this.prisma.user.update({
+            where: { id: userId },
+            data: { avatarDescription },
+          });
+        }
+      } catch (err) {
+        this.logger.warn(`Avatar description generation failed for user ${userId}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     return {
       id: user.id,
       username: user.username,
       nickname: user.nickname,
       bio: user.bio,
       avatarUrl: user.avatarCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${user.avatarCid}` : null,
+      avatarDescription,
       backgroundUrl: user.backgroundCid ? `https://blush-managing-swallow-349.mypinata.cloud/ipfs/${user.backgroundCid}` : null,
       posts: (user._count?.article || 0) + (user._count?.moment || 0),
       followers: user._count?.userfollows_userfollows_followerIdTouser || 0,

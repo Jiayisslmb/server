@@ -504,7 +504,9 @@ model UserDevice {
   id           Int            @id @default(autoincrement())
   userId       Int
   deviceHash   String         @db.VarChar(64)
-  deviceName   String         @db.VarChar(100)
+  deviceUUID   String?        @db.VarChar(36)
+  deviceName   String         @db.VarChar(200)
+  deviceType   String?        @db.VarChar(20)
   os           String?        @db.VarChar(50)
   browser      String?        @db.VarChar(50)
   ipAddress    String?        @db.VarChar(45)
@@ -517,6 +519,7 @@ model UserDevice {
 
   @@unique([userId, deviceHash], map: "UserDevice_userId_deviceHash_key")
   @@index([userId], map: "UserDevice_userId_idx")
+  @@index([deviceUUID], map: "UserDevice_deviceUUID_idx")
 }
 
 model LoginHistory {
