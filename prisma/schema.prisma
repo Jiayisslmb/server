@@ -1,23 +1,19 @@
 /**
  * Prisma ORM 数据库模型定义文件
- *
  * 文件功能说明：
  * - 定义去中心化社交平台的所有数据库表结构
  * - 配置数据库连接和Prisma客户端生成选项
  * - 建立表之间的关系（一对一、一对多、多对多）
  * - 定义索引、唯一约束和数据完整性规则
- *
  * 数据库技术栈：
  * - 数据库：MySQL 8.0+（关系型数据库）
  * - ORM：Prisma 6.x（类型安全的ORM）
  * - 客户端生成：prisma-client-js
- *
  * 核心设计原则：
  * 1. 数据完整性：使用外键约束确保引用完整性
  * 2. 性能优化：为常用查询字段添加索引
  * 3. 安全性：敏感数据加密存储（密码、MFA密钥等）
  * 4. 可扩展性：支持软删除、时间戳审计等特性
- *
  * 模型分类：
  * ┌─────────────────────────────────────────────────────┐
  * │ 用户相关 (User System)                              │
@@ -44,13 +40,11 @@
  * │ 安全与审核 (Security & Moderation)                  │
  * │   - report: 举报记录                                │
  * └─────────────────────────────────────────────────────┘
- *
  * 关系类型说明：
  * - @relation: 定义外键关系
  * - onDelete: Cascade (级联删除) | Restrict (限制删除)
  * - @@unique: 复合唯一约束（防止重复数据）
  * - @@index: 数据库索引（加速查询）
- *
  * @module schema.prisma
  * @version 2.0.0
  * @author 项目开发团队
@@ -59,7 +53,6 @@
 
 /**
  * Prisma Client 生成器配置
- *
  * @description 配置Prisma Client的生成方式
  * - provider: 使用JavaScript/TypeScript运行时
  */
@@ -69,11 +62,9 @@ generator client {
 
 /**
  * 数据源配置
- *
  * @description 定义数据库连接信息
  * - provider: MySQL数据库引擎
  * - url: 从环境变量DATABASE_URL读取连接字符串
- *
  * @env DATABASE_URL 格式：mysql://user:password@host:port/database
  * @example mysql://root:password@localhost:3306/social_platform
  */
@@ -240,9 +231,9 @@ model momentrepost {
   moment    moment   @relation(fields: [momentId], references: [id], onDelete: Cascade, map: "MomentRepost_momentId_fkey")
   user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "MomentRepost_userId_fkey")
 
+  @@unique([momentId, userId], name: "MomentRepost_momentId_userId_key")
   @@index([momentId], map: "MomentRepost_momentId_fkey")
   @@index([userId], map: "MomentRepost_userId_fkey")
-  @@unique([momentId, userId], name: "MomentRepost_momentId_userId_key")
 }
 
 model articlerepost {
@@ -253,9 +244,9 @@ model articlerepost {
   article   article  @relation(fields: [articleId], references: [id], onDelete: Cascade, map: "ArticleRepost_articleId_fkey")
   user      user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "ArticleRepost_userId_fkey")
 
+  @@unique([articleId, userId], name: "ArticleRepost_articleId_userId_key")
   @@index([articleId], map: "ArticleRepost_articleId_fkey")
   @@index([userId], map: "ArticleRepost_userId_fkey")
-  @@unique([articleId, userId], name: "ArticleRepost_articleId_userId_key")
 }
 
 model circle {
@@ -388,9 +379,10 @@ model user {
   emailVerified                             Boolean             @default(false)
   emailVerifyToken                          String?             @db.VarChar(255)
   emailVerifyTokenExpires                   DateTime?
-  website                                  String?             @db.VarChar(255)
-  location                                 String?             @db.VarChar(100)
-  notificationPreferences                  String?             @db.Text
+  avatarDescription                         String?             @db.Text
+  website                                   String?             @db.VarChar(255)
+  location                                  String?             @db.VarChar(100)
+  notificationPreferences                   String?             @db.Text
   adminauditlog                             adminauditlog[]
   adminsession                              adminsession[]
   article                                   article[]
@@ -412,6 +404,8 @@ model user {
   userfollows_userfollows_followingIdTouser userfollows[]       @relation("userfollows_followingIdTouser")
   AiConversation                            AiConversation[]
   AiUserProfile                             AiUserProfile?
+  UserDevice                                UserDevice[]
+  LoginHistory                              LoginHistory[]
 
   @@index([adminDeviceFingerprint], map: "User_adminDeviceFingerprint_idx")
   @@index([githubId], map: "User_githubId_idx")
@@ -461,14 +455,14 @@ model adminauditlog {
 }
 
 model AiConversation {
-  id        Int          @id @default(autoincrement())
+  id        Int         @id @default(autoincrement())
   userId    Int
-  title     String       @db.VarChar(100)
-  model     String       @default("deepseek-v4-pro") @db.VarChar(50)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  title     String      @db.VarChar(100)
+  model     String      @default("deepseek-v4-pro") @db.VarChar(50)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
   messages  AiMessage[]
-  user      user         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      user        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, updatedAt])
 }
@@ -504,4 +498,38 @@ model AiUserProfile {
   interests String? @db.Text
   expertise String? @db.VarChar(50)
   user      user    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserDevice {
+  id           Int            @id @default(autoincrement())
+  userId       Int
+  deviceHash   String         @db.VarChar(64)
+  deviceName   String         @db.VarChar(100)
+  os           String?        @db.VarChar(50)
+  browser      String?        @db.VarChar(50)
+  ipAddress    String?        @db.VarChar(45)
+  location     String?        @db.VarChar(100)
+  isActive     Boolean        @default(true)
+  firstSeenAt  DateTime       @default(now())
+  lastSeenAt   DateTime       @updatedAt
+  user         user           @relation(fields: [userId], references: [id], onDelete: Cascade, map: "UserDevice_userId_fkey")
+  LoginHistory LoginHistory[]
+
+  @@unique([userId, deviceHash], map: "UserDevice_userId_deviceHash_key")
+  @@index([userId], map: "UserDevice_userId_idx")
+}
+
+model LoginHistory {
+  id        Int         @id @default(autoincrement())
+  userId    Int
+  deviceId  Int?
+  ipAddress String?     @db.VarChar(45)
+  location  String?     @db.VarChar(100)
+  userAgent String?     @db.Text
+  success   Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  user      user        @relation(fields: [userId], references: [id], onDelete: Cascade, map: "LoginHistory_userId_fkey")
+  device    UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull, map: "LoginHistory_deviceId_fkey")
+
+  @@index([userId, createdAt], map: "LoginHistory_userId_createdAt_idx")
 }

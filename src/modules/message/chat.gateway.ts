@@ -15,12 +15,18 @@ import { RedisService } from 'src/config/redis.service';
 import { PrismaService } from 'src/config/prisma.service';
 import { NotificationService } from 'src/modules/notification/notification.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
+import { DeviceService } from 'src/common/services/device.service';
 
 interface UserSocket {
   userId: number;
   socketId: string;
   username: string;
-  deviceIds: Set<string>;
+  /** deviceHash → 该设备的所有 socketId */
+  deviceSockets: Map<string, Set<string>>;
+  /** socketId → deviceHash */
+  socketDevices: Map<string, string>;
+  /** socketId → deviceName（用于日志显示） */
+  socketDeviceNames: Map<string, string>;
   lastHeartbeat: Map<string, number>;
   lastActivity: number;
   connectionTime: number;
@@ -96,6 +102,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private prisma: PrismaService,
     private notificationService: NotificationService,
     private encryptionService: EncryptionService,
+    private deviceService: DeviceService,
   ) {
     this.jwtSecret = this.configService.get<string>('JWT_SECRET') || '';
     if (!this.jwtSecret || this.jwtSecret.length < 32) {
@@ -108,9 +115,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleConnection(client: Socket) {
     try {
       const token = client.handshake.auth.token || client.handshake.headers.authorization?.replace('Bearer ', '');
-      
+
       this.logger.log(`客户端尝试连接: ${client.id}, token存在: ${!!token}`);
-      
+
       if (!token) {
         this.logger.warn(`客户端 ${client.id} 未提供认证令牌`);
         client.emit('error', { message: '未提供认证令牌', code: 'AUTH_MISSING' });
@@ -121,7 +128,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       let payload: any;
       try {
         payload = jwt.verify(token, this.jwtSecret);
-        this.logger.log(`Token验证成功: userId=${payload.id || payload.sub}`);
       } catch (err) {
         this.logger.warn(`客户端 ${client.id} Token验证失败: ${err.message}`);
         client.emit('error', { message: '认证令牌无效或已过期', code: 'AUTH_INVALID' });
@@ -130,7 +136,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       const userId = payload.id || payload.sub || payload.userId;
-      
+
       if (!userId) {
         this.logger.warn(`客户端 ${client.id} Token中无用户ID`);
         client.emit('error', { message: '无效的认证令牌', code: 'AUTH_INVALID_USER' });
@@ -150,35 +156,78 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
+      // ========== 解析真实设备信息 ==========
+      const rawDevice = client.handshake.auth.deviceInfo || {};
+      const forwardedFor = client.handshake.headers['x-forwarded-for'] as string | undefined;
+      const deviceInfo = this.deviceService.parseDevice({
+        userAgent: rawDevice.userAgent || client.handshake.headers['user-agent'],
+        platform: rawDevice.platform,
+        language: rawDevice.language,
+        screenWidth: rawDevice.screenWidth,
+        screenHeight: rawDevice.screenHeight,
+        timezone: rawDevice.timezone,
+        ip: client.handshake.address,
+        xForwardedFor: forwardedFor,
+      });
+
+      // 持久化设备记录
+      let deviceRecord: { id: number; deviceHash: string; deviceName: string } | null = null;
+      try {
+        deviceRecord = await this.deviceService.getOrCreateDevice(userId, deviceInfo);
+        await this.deviceService.recordLogin(userId, deviceRecord.id, deviceInfo, true);
+      } catch (dbErr) {
+        this.logger.warn(`设备记录失败: ${dbErr.message}`);
+      }
+
       client.data.userId = userId;
       client.data.username = user.username;
+      client.data.deviceHash = deviceInfo.deviceHash;
       client.data.connectedAt = Date.now();
       this.socketToUser.set(client.id, userId);
 
       const now = Date.now();
       const wasOnline = this.userSockets.has(userId);
-      
+      const deviceName = deviceInfo.deviceName;
+      const locationStr = deviceInfo.location ? ` (${deviceInfo.location})` : '';
+
       if (wasOnline) {
         const userSocket = this.userSockets.get(userId)!;
-        userSocket.deviceIds.add(client.id);
+        // 记录 socket → deviceHash 映射
+        userSocket.socketDevices.set(client.id, deviceInfo.deviceHash);
+        userSocket.socketDeviceNames.set(client.id, deviceName);
+        // 按设备分组
+        if (!userSocket.deviceSockets.has(deviceInfo.deviceHash)) {
+          userSocket.deviceSockets.set(deviceInfo.deviceHash, new Set());
+          this.logger.log(`用户 ${user.username}(${userId}) 新设备上线: ${deviceName} | IP: ${deviceInfo.ipAddress}${locationStr}`);
+        } else {
+          this.logger.log(`用户 ${user.username}(${userId}) 同设备新连接: ${deviceName}（${userSocket.deviceSockets.size} 设备在线）`);
+        }
+        userSocket.deviceSockets.get(deviceInfo.deviceHash)!.add(client.id);
         userSocket.lastHeartbeat.set(client.id, now);
         userSocket.lastActivity = now;
         userSocket.socketId = client.id;
-        this.logger.log(`用户 ${user.username}(${userId}) 添加新设备: ${client.id}, 总设备数: ${userSocket.deviceIds.size}`);
       } else {
         const lastHeartbeat = new Map<string, number>();
         lastHeartbeat.set(client.id, now);
-        
+        const socketDevices = new Map<string, string>();
+        socketDevices.set(client.id, deviceInfo.deviceHash);
+        const socketDeviceNames = new Map<string, string>();
+        socketDeviceNames.set(client.id, deviceName);
+        const deviceSockets = new Map<string, Set<string>>();
+        deviceSockets.set(deviceInfo.deviceHash, new Set([client.id]));
+
         this.userSockets.set(userId, {
           userId,
           socketId: client.id,
           username: user.username,
-          deviceIds: new Set([client.id]),
+          deviceSockets,
+          socketDevices,
+          socketDeviceNames,
           lastHeartbeat,
           lastActivity: now,
           connectionTime: now,
         });
-        this.logger.log(`用户 ${user.username}(${userId}) 首次连接，设备: ${client.id}`);
+        this.logger.log(`用户 ${user.username}(${userId}) 首次连接: ${deviceName} | IP: ${deviceInfo.ipAddress}${locationStr}`);
       }
 
       this.missedHeartbeats.set(client.id, 0);
@@ -193,9 +242,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const unreadCount = await this.getUnreadCount(userId);
       const onlineUsers = await this.getOnlineUserIds();
-      
-      client.emit('connected', { 
-        userId, 
+
+      client.emit('connected', {
+        userId,
         username: user.username,
         unreadCount,
         heartbeatInterval: this.heartbeatConfig.interval,
@@ -206,8 +255,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (!wasOnline) {
         this.broadcastUserStatus(userId, true, now);
       }
-
-      this.logger.log(`用户 ${user.username}(${userId}) 连接成功，设备: ${client.id}`);
     } catch (error) {
       this.logger.error(`连接认证失败: ${error.message}`);
       client.emit('error', { message: '认证失败: ' + error.message, code: 'AUTH_ERROR' });
@@ -218,18 +265,35 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleDisconnect(client: Socket) {
     const userId = this.socketToUser.get(client.id);
     const now = Date.now();
-    
+
     this.stopClientHeartbeat(client.id);
     this.missedHeartbeats.delete(client.id);
-    
+
     if (userId) {
       const userSocket = this.userSockets.get(userId);
-      
+
       if (userSocket) {
-        userSocket.deviceIds.delete(client.id);
         userSocket.lastHeartbeat.delete(client.id);
-        
-        if (userSocket.deviceIds.size === 0) {
+        const deviceHash = userSocket.socketDevices.get(client.id);
+        const deviceName = userSocket.socketDeviceNames.get(client.id) || '未知设备';
+        userSocket.socketDevices.delete(client.id);
+        userSocket.socketDeviceNames.delete(client.id);
+
+        // 从设备分组中移除此 socket
+        if (deviceHash) {
+          const deviceSockets = userSocket.deviceSockets.get(deviceHash);
+          if (deviceSockets) {
+            deviceSockets.delete(client.id);
+            if (deviceSockets.size === 0) {
+              userSocket.deviceSockets.delete(deviceHash);
+              // 该设备所有连接已断开，标记离线
+              this.deviceService.markDeviceOffline(userId, deviceHash).catch(() => {});
+              this.logger.log(`用户 ${userId} 的设备 "${deviceName}" 已离线`);
+            }
+          }
+        }
+
+        if (userSocket.deviceSockets.size === 0) {
           this.userSockets.delete(userId);
           try {
             await this.redis.setUserOffline(userId);
@@ -238,13 +302,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             this.logger.error(`Redis设置离线状态失败: ${redisErr.message}`);
           }
           this.broadcastUserStatus(userId, false, now);
-          this.logger.log(`用户 ${userId} 已完全离线`);
+          this.logger.log(`用户 ${userId} 已完全离线（所有设备断开）`);
         } else {
           userSocket.lastActivity = now;
-          this.logger.log(`用户 ${userId} 的设备 ${client.id} 已断开，剩余设备: ${userSocket.deviceIds.size}`);
         }
       }
-      
+
       this.socketToUser.delete(client.id);
     }
   }
@@ -317,7 +380,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId,
         isOnline,
         lastSeen: lastSeen ? new Date(lastSeen).toISOString() : undefined,
-        deviceCount: userSocket?.deviceIds.size || 0,
+        deviceCount: userSocket?.deviceSockets.size || 0,
       });
     }
     
@@ -369,7 +432,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const receiverSocket = this.userSockets.get(payload.receiverId);
       if (receiverSocket) {
-        for (const socketId of receiverSocket.deviceIds) {
+        for (const socketId of this.getAllDeviceSocketIds(receiverSocket)) {
           this.server.to(socketId).emit('new_message', messageData);
         }
       }
@@ -395,7 +458,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const receiverSocket = this.userSockets.get(payload.receiverId);
     
     if (receiverSocket) {
-      for (const socketId of receiverSocket.deviceIds) {
+      for (const socketId of this.getAllDeviceSocketIds(receiverSocket)) {
         this.server.to(socketId).emit('user_typing', {
           userId: senderId,
           username: client.data.username,
@@ -427,7 +490,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const senderSocket = this.userSockets.get(payload.senderId);
     if (senderSocket) {
-      for (const socketId of senderSocket.deviceIds) {
+      for (const socketId of this.getAllDeviceSocketIds(senderSocket)) {
         this.server.to(socketId).emit('messages_read', {
           byUserId: userId,
           senderId: payload.senderId,
@@ -441,7 +504,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const onlineUsers = Array.from(this.userSockets.values()).map(us => ({
       userId: us.userId,
       username: us.username,
-      deviceCount: us.deviceIds.size,
+      deviceCount: us.deviceSockets.size,
       lastActivity: us.lastActivity,
     }));
     
@@ -602,6 +665,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  /** 获取用户所有设备的所有 socket ID（扁平化） */
+  private getAllDeviceSocketIds(userSocket: UserSocket): string[] {
+    const ids: string[] = [];
+    for (const sockets of userSocket.deviceSockets.values()) {
+      for (const sid of sockets) {
+        ids.push(sid);
+      }
+    }
+    return ids;
+  }
+
   private getConversationRoomName(userId1: number, userId2: number): string {
     const ids = [userId1, userId2].sort((a, b) => a - b);
     return `conversation:${ids[0]}:${ids[1]}`;
@@ -624,7 +698,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async broadcastNotification(userId: number, notification: any): Promise<void> {
     const userSocket = this.userSockets.get(userId);
     if (userSocket) {
-      for (const socketId of userSocket.deviceIds) {
+      for (const socketId of this.getAllDeviceSocketIds(userSocket)) {
         try {
           this.server.to(socketId).emit('new_notification', notification);
           this.logger.log(`通知已广播给用户 ${userId}，设备: ${socketId}`);
@@ -744,7 +818,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   getUserDevices(userId: number): string[] {
     const userSocket = this.userSockets.get(userId);
-    return userSocket ? Array.from(userSocket.deviceIds) : [];
+    return userSocket ? this.getAllDeviceSocketIds(userSocket) : [];
   }
 
   getOnlineUserCount(): number {
@@ -754,7 +828,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   sendToUser(userId: number, event: string, data: any): boolean {
     const userSocket = this.userSockets.get(userId);
     if (userSocket) {
-      for (const socketId of userSocket.deviceIds) {
+      for (const socketId of this.getAllDeviceSocketIds(userSocket)) {
         this.server.to(socketId).emit(event, data);
       }
       return true;
@@ -769,7 +843,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   } {
     let totalConnections = 0;
     for (const userSocket of this.userSockets.values()) {
-      totalConnections += userSocket.deviceIds.size;
+      totalConnections += userSocket.deviceSockets.size;
     }
     
     return {
