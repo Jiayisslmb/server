@@ -63,7 +63,7 @@
 
 // 内容服务（处理 Moment 动态和 Article 文章相关业务逻辑）
 
-import { Injectable, NotFoundException, UnauthorizedException, ConflictException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, ConflictException, ForbiddenException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from 'src/config/prisma.service';
 import { RedisService } from 'src/config/redis.service';
 import { CreateMomentDto, CreateArticleDto, UpdateMomentDto } from './dto';
@@ -103,6 +103,11 @@ export class ContentService {
 
   async createMoment(userId: number, createMomentDto: CreateMomentDto) {
     const mediaCid = createMomentDto.mediaCid || createMomentDto.mediaUrl || null;
+
+    // 校验 CID 合法性：拒绝 localStorage 假 CID
+    if (mediaCid) {
+      this.validateIpfsCid(mediaCid);
+    }
 
     const moment = await this.prisma.moment.create({
       data: {
@@ -759,6 +764,11 @@ export class ContentService {
   // ==================== Article 文章相关 ====================
 
   async createArticle(userId: number, createArticleDto: CreateArticleDto) {
+    // 校验 CID 合法性：拒绝 localStorage 假 CID
+    if (createArticleDto.coverCid) {
+      this.validateIpfsCid(createArticleDto.coverCid);
+    }
+
     const article = await this.prisma.article.create({
       data: {
         title: createArticleDto.title,
@@ -1645,5 +1655,30 @@ export class ContentService {
       },
     });
     return !!follow;
+  }
+
+  /**
+   * 校验 IPFS CID 合法性
+   * 拒绝客户端 localStorage 降级生成的假 CID（local_ 前缀）
+   * CIDv0: Qm... (46字符), CIDv1: b... (base32)
+   */
+  private validateIpfsCid(cid: string): void {
+    if (cid.startsWith('local_')) {
+      throw new BadRequestException(
+        '图片上传失败：文件未成功上传到 IPFS 网络，请重新上传。' +
+        '（如文件过大（>4MB），请尝试压缩后再上传）'
+      );
+    }
+    if (cid.startsWith('data:')) {
+      throw new BadRequestException(
+        '图片上传失败：收到 base64 数据而非 IPFS CID，请重新上传'
+      );
+    }
+    // 基本格式校验：合法 CID 以 Qm 或 b 开头，且不含逗号
+    if (!cid.startsWith('Qm') && !cid.startsWith('b')) {
+      throw new BadRequestException(
+        `无效的 IPFS CID 格式: ${cid.substring(0, 20)}...，请重新上传文件`
+      );
+    }
   }
 }
