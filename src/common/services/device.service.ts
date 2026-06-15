@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/config/prisma.service';
 import * as crypto from 'crypto';
-import * as UAParser from 'ua-parser-js';
-import * as geoip from 'geoip-lite';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const UAParser = require('ua-parser-js');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const geoip = require('geoip-lite');
 
 export interface DeviceInfo {
   deviceHash: string;
@@ -34,8 +36,8 @@ export class DeviceService {
     xForwardedFor?: string;
   }): DeviceInfo {
     const ua = raw.userAgent || 'Unknown';
-    const parser = new UAParser(ua);
-    const uaResult = parser.getResult();
+    const parser = UAParser(ua);
+    const uaResult = parser;
 
     const osName = uaResult.os.name || 'Unknown';
     const osVersion = uaResult.os.version || '';
