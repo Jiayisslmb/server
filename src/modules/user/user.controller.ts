@@ -25,6 +25,7 @@ import { ParseIntPipe } from '@nestjs/common';
 import { AdminService } from '../admin/admin.service';
 import { RedisService } from 'src/config/redis.service';
 import { EmailService } from 'src/common/services/email.service';
+import { PrismaService } from 'src/config/prisma.service';
 import type { Request as ExpressRequest } from 'express';
 
 @Controller('users')
@@ -35,6 +36,7 @@ export class UserController {
     private readonly redis: RedisService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private async checkRegistrationRateLimit(ip: string): Promise<void> {
@@ -426,5 +428,64 @@ export class UserController {
       description,
       req.user.id,
     );
+  }
+
+  // ==================== 设备管理 ====================
+
+  /** 获取当前用户的所有登录设备 */
+  @Get('devices')
+  @UseGuards(JwtAuthGuard)
+  async getDevices(@Request() req) {
+    return this.prisma.userDevice.findMany({
+      where: { userId: req.user.id },
+      orderBy: { lastSeenAt: 'desc' },
+      select: {
+        id: true,
+        deviceName: true,
+        os: true,
+        browser: true,
+        ipAddress: true,
+        location: true,
+        isActive: true,
+        firstSeenAt: true,
+        lastSeenAt: true,
+      },
+    });
+  }
+
+  /** 获取当前用户的登录历史 */
+  @Get('login-history')
+  @UseGuards(JwtAuthGuard)
+  async getLoginHistory(@Request() req, @Query('limit') limit?: string) {
+    return this.prisma.loginHistory.findMany({
+      where: { userId: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      take: parseInt(limit || '20', 10),
+      select: {
+        id: true,
+        ipAddress: true,
+        location: true,
+        userAgent: true,
+        success: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  /** 踢出指定设备（撤销会话） */
+  @Delete('devices/:id')
+  @UseGuards(JwtAuthGuard)
+  async revokeDevice(@Request() req, @Param('id', ParseIntPipe) id: number) {
+    const device = await this.prisma.userDevice.findFirst({
+      where: { id, userId: req.user.id },
+    });
+    if (!device) {
+      throw new NotFoundException('设备不存在');
+    }
+    await this.prisma.userDevice.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    return { success: true, message: '设备已移除' };
   }
 }

@@ -166,6 +166,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         screenWidth: rawDevice.screenWidth,
         screenHeight: rawDevice.screenHeight,
         timezone: rawDevice.timezone,
+        platformVersion: rawDevice.platformVersion,
         ip: client.handshake.address,
         xForwardedFor: forwardedFor,
       });

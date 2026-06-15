@@ -32,6 +32,7 @@ export class DeviceService {
     screenWidth?: number;
     screenHeight?: number;
     timezone?: string;
+    platformVersion?: string;
     ip?: string;
     xForwardedFor?: string;
   }): DeviceInfo {
@@ -39,8 +40,18 @@ export class DeviceService {
     const parser = UAParser(ua);
     const uaResult = parser;
 
-    const osName = uaResult.os.name || 'Unknown';
+    let osName = uaResult.os.name || 'Unknown';
     const osVersion = uaResult.os.version || '';
+
+    // Windows 11 检测：UA 中 NT 版本同为 10.0，需借助 platformVersion
+    // Win11 的 platformVersion major ≥ 13，Win10 为 1~10
+    if (osName === 'Windows' && raw.platformVersion) {
+      const majorPlatform = parseInt(raw.platformVersion.split('.')[0], 10);
+      if (!isNaN(majorPlatform) && majorPlatform >= 13) {
+        osName = 'Windows 11';
+      }
+    }
+
     const os = osVersion ? `${osName} ${osVersion}` : osName;
 
     const browserName = uaResult.browser.name || 'Unknown';
