@@ -15,6 +15,7 @@ export class EncryptionService implements OnModuleInit {
   private readonly logger = new Logger(EncryptionService.name);
   private readonly algorithm = 'aes-256-gcm';
   private key: Buffer;
+  private legacyKeys: Buffer[] = [];
   private readonly keyFilePath: string;
 
   constructor(private configService: ConfigService) {
@@ -23,6 +24,46 @@ export class EncryptionService implements OnModuleInit {
 
   async onModuleInit() {
     this.key = await this.initializeKey();
+    await this.loadLegacyKeys();
+  }
+
+  /**
+   * 加载旧加密密钥，用于兼容解密历史消息
+   * 来源：encryption.key 文件 + LEGACY_ENCRYPTION_KEY 环境变量
+   */
+  private async loadLegacyKeys(): Promise<void> {
+    // 1. 从 encryption.key 文件加载（如果与当前密钥不同）
+    try {
+      if (fs.existsSync(this.keyFilePath)) {
+        const savedKey = fs.readFileSync(this.keyFilePath, 'utf8').trim();
+        const legacyKey = Buffer.from(savedKey, 'hex');
+        if (legacyKey.length === 32 && !legacyKey.equals(this.key)) {
+          this.legacyKeys.push(legacyKey);
+          this.logger.log('已从文件加载旧加密密钥，用于兼容解密历史消息');
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`加载旧密钥文件失败: ${err.message}`);
+    }
+
+    // 2. 从 LEGACY_ENCRYPTION_KEY 环境变量加载
+    const envLegacyKey = this.configService.get<string>('LEGACY_ENCRYPTION_KEY');
+    if (envLegacyKey) {
+      try {
+        const key = Buffer.from(envLegacyKey, 'hex');
+        if (key.length === 32 && !key.equals(this.key) &&
+            !this.legacyKeys.some(k => k.equals(key))) {
+          this.legacyKeys.push(key);
+          this.logger.log('已从环境变量加载旧加密密钥');
+        }
+      } catch (err) {
+        this.logger.warn(`解析 LEGACY_ENCRYPTION_KEY 失败: ${err.message}`);
+      }
+    }
+
+    if (this.legacyKeys.length > 0) {
+      this.logger.log(`共加载 ${this.legacyKeys.length} 个旧加密密钥`);
+    }
   }
 
   private async initializeKey(): Promise<Buffer> {
@@ -78,17 +119,22 @@ export class EncryptionService implements OnModuleInit {
   }
 
   decrypt(encryptedData: EncryptedData): string {
+    return this.decryptWithKey(encryptedData, this.key);
+  }
+
+  /** 使用指定密钥解密（供双密钥兼容使用） */
+  private decryptWithKey(encryptedData: EncryptedData, key: Buffer): string {
     const decipher = crypto.createDecipheriv(
       this.algorithm,
-      this.key,
+      key,
       Buffer.from(encryptedData.iv, 'hex'),
     );
-    
+
     decipher.setAuthTag(Buffer.from(encryptedData.authTag, 'hex'));
-    
+
     let decrypted = decipher.update(encryptedData.encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
-    
+
     return decrypted;
   }
 
@@ -110,7 +156,22 @@ export class EncryptionService implements OnModuleInit {
     try {
       const encryptedData: EncryptedData = JSON.parse(storedData);
       if (encryptedData.encrypted && encryptedData.iv && encryptedData.authTag) {
-        return this.decrypt(encryptedData);
+        // 先尝试主密钥解密
+        try {
+          return this.decrypt(encryptedData);
+        } catch (primaryError) {
+          // 主密钥失败，尝试旧密钥
+          for (const legacyKey of this.legacyKeys) {
+            try {
+              const result = this.decryptWithKey(encryptedData, legacyKey);
+              this.logger.log('使用旧密钥成功解密一条历史消息');
+              return result;
+            } catch (legacyError) {
+              continue;
+            }
+          }
+          throw primaryError;
+        }
       }
     } catch (error) {
     }
